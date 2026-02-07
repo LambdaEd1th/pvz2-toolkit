@@ -1,0 +1,18 @@
+[workspace]
+members = [
+    "core/ptx",
+    "core/pam",
+    "core/lawnstrings",
+    "cli",
+    "core/rton",
+    "core/newton",
+    "core/rsb",
+    "core/rsg",
+    "core/popfx",
+    "core/bnk",
+    "core/wem",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"

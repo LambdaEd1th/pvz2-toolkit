@@ -1,0 +1,24 @@
+[package]
+name = "rton"
+version = "0.1.1"
+edition.workspace = true
+authors = ["ed1th"]
+categories = ["encoding", "parser-implementations"]
+readme = "README.md"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/LambdaEd1th/serde_rton"
+
+[dependencies]
+serde = { version = "1.0.228", features = ["derive"] }
+thiserror = "2.0.18"
+byteorder = "1.5.0"
+regex = "1.12.2"
+num_enum = "0.7.5"
+integer-encoding = "4.1.0"
+simple-rijndael = "0.3.2"
+md5 = "0.8.0"
+hex = "0.4.3"
+
+[dev-dependencies]
+serde_yaml = "0.9.33"
+serde_json = "1.0.149"

@@ -1,0 +1,929 @@
+use anyhow::Context;
+use byteorder::WriteBytesExt;
+use clap::{Parser, Subcommand};
+use ptx::PtxDecoder;
+use rsb::Rsb;
+use rsb::types::RsbPtxInfo;
+use rsg::types::UnpackedFile;
+use rsg::{pack_rsg, unpack_rsg};
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+
+#[derive(Parser)]
+#[command(name = "rsb-cli")]
+#[command(about = "CLI for RSB/RSG resource files", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Unpack an RSB file
+    Unpack {
+        /// Input RSB file path
+        input: PathBuf,
+        /// Output directory (optional, defaults to file name stem)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Convert PTX files to PNG
+        #[arg(short, long)]
+        convert_ptx: bool,
+        /// Treat RGBA8888 (Format 0) as PowerVR/iOS format (BGRA) instead of default (RGBA)
+        #[arg(long)]
+        powervr: bool,
+        /// Convert RTON files to JSON
+        #[arg(long)]
+        convert_rton: bool,
+    },
+    /// Pack a directory into an RSB file
+    Pack {
+        /// Input directory (containing rsb_manifest.json)
+        input: PathBuf,
+        /// Output RSB file
+        output: PathBuf,
+    },
+    /// Convert Newton file (Binary <-> JSON)
+    ConvertNewton {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Convert PAM file (Binary -> JSON)
+    ConvertPam {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Convert PAM file to XFL (Flash) project
+    ConvertPamXfl {
+        /// Input file
+        input: PathBuf,
+        /// Output directory (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Convert PAM file to HTML5 Canvas preview
+    ConvertPamHtml {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Convert LawnStrings (Text <-> JSON)
+    ConvertLawnStrings {
+        /// Input file (.txt or .json)
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Convert POPFX file (Binary -> JSON)
+    ConvertPopfx {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+    },
+    /// Convert BNK file (Binary -> JSON + WEM extraction)
+    ConvertBnk {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Disable WEM extraction
+        #[arg(long)]
+        no_extract: bool,
+    },
+    /// Convert WEM file to OGG
+    ConvertWem {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Codebooks file location (packed_codebooks_aoTuV_603.bin)
+        #[arg(short, long)]
+        codebooks: Option<String>,
+        /// Do not decode audio to WAV, extract original stream if possible (Vorbis -> OGG, AAC -> M4A)
+        #[arg(long)]
+        original: bool,
+    },
+}
+
+#[derive(Serialize, Deserialize)]
+struct ManifestInfo {
+    version: u32,
+    ptx_info_size: u32,
+    path: RsbPathInfo,
+    group: Vec<GroupInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RsbPathInfo {
+    rsgs: Vec<String>,
+    packet_path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct GroupInfo {
+    name: String,
+    is_composite: bool,
+    subgroup: Vec<SubGroupInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct SubGroupInfo {
+    name_packet: String,
+    category: [String; 2],
+    packet_info: RsbPacketInfo,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RsbPacketInfo {
+    version: u32,
+    compression_flags: u32,
+    res: Vec<RsbResInfo>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RsbResInfo {
+    path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ptx_info: Option<RsbPtxInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ptx_property: Option<PtxProperty>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PtxProperty {
+    format: i32,
+    pitch: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alpha_size: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    alpha_format: Option<i32>,
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+
+    match &cli.command {
+        Commands::Unpack {
+            input,
+            output,
+            convert_ptx,
+            powervr,
+            convert_rton,
+        } => {
+            unpack_rsb(input, output, *convert_ptx, *powervr, *convert_rton)?;
+        }
+        Commands::Pack { input, output } => {
+            pack_rsb(input, output)?;
+        }
+        Commands::ConvertNewton { input, output } => {
+            convert_newton(input, output)?;
+        }
+        Commands::ConvertPam { input, output } => {
+            convert_pam(input, output)?;
+        }
+        Commands::ConvertPamXfl { input, output } => {
+            convert_pam_xfl(input, output)?;
+        }
+        Commands::ConvertPamHtml { input, output } => {
+            convert_pam_html(input, output)?;
+        }
+        Commands::ConvertLawnStrings { input, output } => {
+            convert_lawn_strings(input, output)?;
+        }
+        Commands::ConvertPopfx { input, output } => {
+            convert_popfx(input, output)?;
+        }
+        Commands::ConvertBnk {
+            input,
+            output,
+            no_extract,
+        } => {
+            convert_bnk(input, output, *no_extract)?;
+        }
+        Commands::ConvertWem {
+            input,
+            output,
+            codebooks,
+            original,
+        } => {
+            convert_wem(input, output, codebooks, *original)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn unpack_rsb(
+    input: &Path,
+    output: &Option<PathBuf>,
+    convert_ptx: bool,
+    is_powervr: bool,
+    convert_rton: bool,
+) -> anyhow::Result<()> {
+    let file = fs::File::open(input)?;
+    let mut rsb = Rsb::open(file)?;
+
+    let out_dir = match output {
+        Some(p) => p.clone(),
+        None => {
+            let file_stem = input.file_stem().unwrap_or_default();
+            PathBuf::from(file_stem)
+        }
+    };
+
+    if !out_dir.exists() {
+        fs::create_dir_all(&out_dir)?;
+    }
+
+    println!("Unpacking {:?} to {:?}", input, out_dir);
+
+    // Read all metadata
+    let rsg_infos = rsb.read_rsg_info()?;
+    let composite_infos = rsb.read_composite_info()?;
+    let ptx_infos = rsb.read_ptx_info()?;
+    // AutoPool is read but not used in ManifestInfo according to C# logic, but we can log it
+    let _autopool_infos = rsb.read_autopool_info()?;
+
+    println!("Found {} RSG packets.", rsg_infos.len());
+    println!("Found {} Composite groups.", composite_infos.len());
+
+    // Generate description.json if V3
+    if rsb.header.version == 3 {
+        match rsb.read_resources_description(out_dir.to_str().unwrap_or_default()) {
+            Ok(desc) => {
+                let desc_path = out_dir.join("description.json");
+                fs::write(desc_path, serde_json::to_string_pretty(&desc)?)?;
+                println!("Generated description.json");
+            }
+            Err(e) => {
+                println!("Warning: Failed to read resources description: {:?}", e);
+            }
+        }
+    }
+
+    let mut group_list = Vec::new();
+    let mut rsg_name_list = Vec::new();
+
+    // Iterate Composites to drive unpacking (Parity with C#)
+    for composite in composite_infos {
+        let mut sub_group_list = Vec::new();
+
+        for packet_entry in composite.packet_info {
+            // Find RSG with pool_index == packet_index
+            if let Some(rsg_info) = rsg_infos
+                .iter()
+                .find(|r| r.pool_index == packet_entry.packet_index)
+            {
+                rsg_name_list.push(rsg_info.name.clone());
+
+                let packet_data = rsb.extract_packet(rsg_info)?;
+                let rsg_dir = out_dir.join(&rsg_info.name);
+                if !rsg_dir.exists() {
+                    fs::create_dir_all(&rsg_dir)?;
+                }
+
+                if packet_data.is_empty() {
+                    println!("  Packet {} is empty.", rsg_info.name);
+                } else {
+                    let mut reader = std::io::Cursor::new(&packet_data);
+                    match unpack_rsg(&mut reader) {
+                        Ok(unpacked_files) => {
+                            // Write manifest.json (original CLI style) for local repacking support
+                            let manifest_path = rsg_dir.join("manifest.json");
+                            fs::write(
+                                &manifest_path,
+                                serde_json::to_string_pretty(&unpacked_files)?,
+                            )?;
+
+                            use rayon::prelude::*;
+                            // Parallel Processing for asset extraction/conversion
+                            let res_info_list: Vec<RsbResInfo> = unpacked_files
+                                .par_iter()
+                                .map(|file| {
+                                    let clean_path = file.path.replace('\\', "/");
+                                    let target_path = rsg_dir.join(&clean_path);
+
+                                    // 1. Write File
+                                    if let Some(parent) = target_path.parent() {
+                                        let _ = fs::create_dir_all(parent);
+                                    }
+                                    if let Err(e) = fs::write(&target_path, &file.data) {
+                                        eprintln!("Error writing {}: {:?}", clean_path, e);
+                                    }
+
+                                    // 2. Prepare Info
+                                    let mut ptx_info = None;
+                                    let mut ptx_property = None;
+
+                                    if let Some(extra) = &file.part1_info {
+                                        let global_ptx_idx =
+                                            rsg_info.ptx_before_number as usize + extra.id as usize;
+                                        // ptx_infos is shared ref, so thread safe access is OK
+                                        if let Some(global_ptx) = ptx_infos.get(global_ptx_idx) {
+                                            ptx_info = Some(RsbPtxInfo {
+                                                ptx_index: global_ptx.ptx_index,
+                                                width: global_ptx.width,
+                                                height: global_ptx.height,
+                                                pitch: global_ptx.pitch,
+                                                format: global_ptx.format,
+                                                alpha_size: global_ptx.alpha_size,
+                                                alpha_format: global_ptx.alpha_format,
+                                            });
+
+                                            ptx_property = Some(PtxProperty {
+                                                format: global_ptx.format,
+                                                pitch: global_ptx.pitch,
+                                                alpha_size: global_ptx.alpha_size,
+                                                alpha_format: global_ptx.alpha_format,
+                                            });
+                                        }
+                                    }
+
+                                    // 3. Convert PTX
+                                    if convert_ptx && (clean_path.to_lowercase().ends_with(".ptx"))
+                                    {
+                                        if let Some(info) = &ptx_info {
+                                            // use rsb_ptx::PtxDecoder; (Impoted globally)
+                                            match PtxDecoder::decode(
+                                                &file.data,
+                                                info.width as u32,
+                                                info.height as u32,
+                                                info.format,
+                                                info.alpha_size,
+                                                is_powervr,
+                                            ) {
+                                                Ok(img) => {
+                                                    let png_path =
+                                                        target_path.with_extension("png");
+                                                    match img.save(&png_path) {
+                                                        Ok(_) => println!(
+                                                            "    Converted to PNG: {:?}",
+                                                            png_path.file_name().unwrap()
+                                                        ),
+                                                        Err(e) => eprintln!(
+                                                            "    Failed to save PNG for {}: {:?}",
+                                                            clean_path, e
+                                                        ),
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    eprintln!(
+                                                        "    Failed to decode {}: {:?}",
+                                                        clean_path, e
+                                                    );
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // 4. Convert RTON
+                                    if convert_rton && (clean_path.to_lowercase().ends_with(".rton")) {
+                                        use rton::RtonValue;
+                                        // Attempt to convert RTON to JSON
+                                        match rton::from_bytes::<RtonValue>(&file.data) {
+                                            Ok(val) => {
+                                                let json_path = target_path.with_extension("json");
+                                                match serde_json::to_string_pretty(&val) {
+                                                     Ok(json_str) => {
+                                                         match fs::write(&json_path, json_str) {
+                                                             Ok(_) => println!("    Converted to JSON: {:?}", json_path.file_name().unwrap()),
+                                                             Err(e) => eprintln!("    Failed to write JSON for {}: {:?}", clean_path, e),
+                                                         }
+                                                     },
+                                                     Err(e) => eprintln!("    Failed to serialize JSON for {}: {:?}", clean_path, e),
+                                                }
+                                            }
+                                            Err(e) => {
+                                                eprintln!("    Failed to decode RTON {}: {:?}", clean_path, e);
+                                            }
+                                        }
+                                    }
+
+                                    RsbResInfo {
+                                        path: file.path.clone(),
+                                        ptx_info,
+                                        ptx_property,
+                                    }
+                                })
+                                .collect();
+
+                            sub_group_list.push(SubGroupInfo {
+                                name_packet: rsg_info.name.clone(),
+                                category: packet_entry.category.clone(),
+                                packet_info: RsbPacketInfo {
+                                    version: 3, // Assuming 3 for now, ideally read from packet
+                                    compression_flags: 0,
+                                    res: res_info_list,
+                                },
+                            });
+                        }
+                        Err(e) => {
+                            eprintln!("  Error unpacking RSG {}: {:?}", rsg_info.name, e);
+                        }
+                    }
+                }
+            }
+        }
+
+        group_list.push(GroupInfo {
+            name: composite.name.clone(),
+            is_composite: composite.is_composite,
+            subgroup: sub_group_list,
+        });
+    }
+
+    // Write ManifestInfo (rsb_manifest.json)
+    let manifest_info = ManifestInfo {
+        version: rsb.header.version,
+        ptx_info_size: rsb.header.ptx_info_each_length,
+        path: RsbPathInfo {
+            rsgs: rsg_name_list,
+            packet_path: "packet".to_string(), // Default convention
+        },
+        group: group_list,
+    };
+
+    let manifest_path = out_dir.join("rsb_manifest.json");
+    fs::write(manifest_path, serde_json::to_string_pretty(&manifest_info)?)?;
+
+    println!("Unpack complete.");
+    Ok(())
+}
+
+fn pack_rsb(input: &Path, output: &Path) -> anyhow::Result<()> {
+    // Read Global Manifest
+    let rsb_manifest_path = input.join("rsb_manifest.json");
+    let rsb_manifest_content = fs::read_to_string(&rsb_manifest_path)?;
+    let rsb_manifest: ManifestInfo = serde_json::from_str(&rsb_manifest_content)?;
+
+    struct PackedRsg {
+        name: String,
+        pool_index: i32,
+        ptx_number: u32,
+        ptx_before_number: u32,
+        data: Vec<u8>,
+    }
+
+    let mut packed_rsgs = Vec::new();
+
+    // We iterate `path.rsgs` to find packets to pack (linear list).
+    for (current_pool_index, packet_name) in rsb_manifest.path.rsgs.into_iter().enumerate() {
+        println!("Packing packet: {}", packet_name);
+        let rsg_dir = input.join(&packet_name);
+        let manifest_path = rsg_dir.join("manifest.json");
+        let mut rsg_data = Vec::new();
+
+        let mut ptx_num = 0;
+
+        if manifest_path.exists() {
+            let manifest_content = fs::read_to_string(&manifest_path)?;
+            let mut unpacked_files: Vec<UnpackedFile> = serde_json::from_str(&manifest_content)?;
+
+            // Read file data from disk
+            for file in &mut unpacked_files {
+                let clean_path = file.path.replace('\\', "/");
+                let file_path = rsg_dir.join(clean_path);
+                file.data = fs::read(&file_path)?;
+                if file.part1_info.is_some() {
+                    ptx_num += 1;
+                }
+            }
+
+            let mut cursor = Cursor::new(&mut rsg_data);
+            pack_rsg(&mut cursor, &unpacked_files, 4, 0)?;
+        } else {
+            println!("  No manifest found for {}, packing empty.", packet_name);
+        }
+
+        packed_rsgs.push(PackedRsg {
+            name: packet_name,
+            pool_index: current_pool_index as i32,
+            ptx_number: ptx_num,
+            ptx_before_number: 0,
+            data: rsg_data,
+        });
+    }
+
+    // Calculate ptx_before_number
+    let mut accum_ptx = 0;
+    for rsg in &mut packed_rsgs {
+        rsg.ptx_before_number = accum_ptx;
+        accum_ptx += rsg.ptx_number;
+    }
+
+    // Write RSB
+    let mut writer = fs::File::create(output)?;
+
+    // Minimal RSB Header
+    writer.write_all(b"1bsr")?;
+    writer.write_u32::<byteorder::LE>(rsb_manifest.version)?;
+
+    let start_pos = writer.stream_position()? - 8; // Start of file
+
+    // 1. Header Placeholders (0x00 - 0x100)
+    let header_size = 0x100;
+    writer.write_all(&vec![0u8; header_size - 8])?; // Already wrote 8 bytes
+
+    // 2. RSG Info List
+    let rsg_info_begin = writer.stream_position()?;
+    let rsg_info_each_len = 204;
+
+    for _ in 0..packed_rsgs.len() {
+        writer.write_all(&vec![0u8; rsg_info_each_len as usize])?;
+    }
+
+    fn align<W: Write + Seek>(w: &mut W) -> anyhow::Result<()> {
+        let pos = w.stream_position()?;
+        if pos % 4096 != 0 {
+            let pad = 4096 - (pos % 4096);
+            w.write_all(&vec![0u8; pad as usize])?;
+        }
+        Ok(())
+    }
+
+    align(&mut writer)?;
+
+    // Write Packets
+    let mut packet_offsets = Vec::new();
+
+    for packet in &packed_rsgs {
+        let offset = (writer.stream_position()? - start_pos) as u32;
+        writer.write_all(&packet.data)?;
+        let length = packet.data.len() as u32;
+        packet_offsets.push((offset, length));
+        align(&mut writer)?;
+    }
+
+    let file_end = writer.stream_position()?;
+
+    // Rewind and fill info
+    // Fill RSG Info List
+    for (i, packet) in packed_rsgs.iter().enumerate() {
+        let info_offset = rsg_info_begin + (i as u64 * rsg_info_each_len as u64);
+        writer.seek(SeekFrom::Start(info_offset))?;
+
+        let mut name_bytes = [0u8; 128];
+        let name_src = packet.name.as_bytes();
+        let len = std::cmp::min(name_src.len(), 127);
+        name_bytes[..len].copy_from_slice(&name_src[..len]);
+        writer.write_all(&name_bytes)?;
+
+        let (pkt_off, pkt_len) = packet_offsets[i];
+
+        writer.write_u32::<byteorder::LE>(pkt_off)?;
+        writer.write_u32::<byteorder::LE>(pkt_len)?;
+        writer.write_i32::<byteorder::LE>(packet.pool_index)?;
+
+        let current_rel = 140;
+        let target_ptx = 196;
+        writer.write_all(&vec![0u8; target_ptx - current_rel])?;
+
+        writer.write_u32::<byteorder::LE>(packet.ptx_number)?;
+        writer.write_u32::<byteorder::LE>(packet.ptx_before_number)?;
+    }
+
+    // Fill Header
+    writer.seek(SeekFrom::Start(start_pos))?;
+    // Magic 1bsr
+    writer.write_all(b"1bsr")?;
+    writer.write_u32::<byteorder::LE>(rsb_manifest.version)?;
+
+    // 0x08: fileOffset
+    writer.write_u32::<byteorder::LE>(file_end as u32)?;
+
+    writer.write_u32::<byteorder::LE>(0)?; // fileListLength
+    writer.write_u32::<byteorder::LE>(0)?; // fileListOffset
+    writer.write_u64::<byteorder::LE>(0)?; // Padding
+
+    writer.write_u32::<byteorder::LE>(0)?; // rsgListLength
+    writer.write_u32::<byteorder::LE>(0)?; // rsgListOffset
+
+    writer.write_u32::<byteorder::LE>(packed_rsgs.len() as u32)?;
+    writer.write_u32::<byteorder::LE>((rsg_info_begin - start_pos) as u32)?;
+    writer.write_u32::<byteorder::LE>(rsg_info_each_len as u32)?;
+
+    println!("Pack complete. Written to {:?}", output);
+
+    Ok(())
+}
+
+fn convert_newton(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
+    let input_str = input.to_string_lossy();
+    let is_json = input_str.to_lowercase().ends_with(".json");
+
+    if is_json {
+        // Encode JSON -> Binary
+        let json_content = fs::read_to_string(input)?;
+        let group: newton::MResourceGroup = serde_json::from_str(&json_content)?;
+
+        let out_path = match output {
+            Some(p) => p.clone(),
+            None => input.with_extension("bin"), // Or assume original extension?
+        };
+
+        let mut file = fs::File::create(&out_path)?;
+        newton::encode_newton(&group, &mut file)?;
+        println!("Encoded Newton binary to {:?}", out_path);
+    } else {
+        // Decode Binary -> JSON
+        let mut file = fs::File::open(input)?;
+        let group = newton::decode_newton(&mut file)
+            .map_err(|e| anyhow::anyhow!("Newton decode error: {:?}", e))?;
+
+        let out_path = match output {
+            Some(p) => p.clone(),
+            None => input.with_extension("json"),
+        };
+
+        fs::write(&out_path, serde_json::to_string_pretty(&group)?)?;
+        println!("Decoded Newton binary to {:?}", out_path);
+    }
+    Ok(())
+}
+
+fn convert_pam(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
+    // Decode Binary -> JSON
+    let mut file = fs::File::open(input)?;
+    let pam_info = pam::decode_pam(&mut file)?;
+
+    let out_path = match output {
+        Some(p) => p.clone(),
+        None => input.with_extension("json"),
+    };
+
+    fs::write(&out_path, serde_json::to_string_pretty(&pam_info)?)?;
+    println!("Decoded PAM binary to {:?}", out_path);
+    Ok(())
+}
+
+fn convert_pam_xfl(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
+    // Decode PAM -> XFL
+    let mut file = fs::File::open(input)?;
+    let pam_info = pam::decode_pam(&mut file)?;
+
+    let out_dir = match output {
+        Some(p) => p.clone(),
+        None => input.with_extension("XFL_PROJECT"),
+    };
+
+    pam::flash::convert_to_xfl(&pam_info, &out_dir)?;
+    println!("Converted PAM to XFL project at {:?}", out_dir);
+    Ok(())
+}
+
+fn convert_pam_html(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
+    // Decode PAM -> HTML
+    let mut file = fs::File::open(input)?;
+    let pam_info = pam::decode_pam(&mut file)?;
+
+    let out_path = match output {
+        Some(p) => p.clone(),
+        None => input.with_extension("html"),
+    };
+
+    pam::html5::convert_to_html(&pam_info, &out_path)?;
+    println!("Converted PAM to HTML5 preview at {:?}", out_path);
+    Ok(())
+}
+
+fn convert_lawn_strings(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
+    let extension = input
+        .extension()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase();
+
+    if extension == "json" {
+        // JSON -> Text
+        let file = fs::File::open(input)?;
+        let reader = std::io::BufReader::new(file);
+        let root: lawnstrings::LawnStringsRoot = serde_json::from_reader(reader)?;
+
+        let text_content = lawnstrings::write_lawn_strings(&root)?;
+
+        let out_path = match output {
+            Some(p) => p.clone(),
+            None => input.with_extension("txt"),
+        };
+
+        fs::write(&out_path, text_content)?;
+        println!("Converted JSON to LawnStrings Text at {:?}", out_path);
+    } else {
+        // Text -> JSON (Assume Text if not JSON)
+        let content = fs::read_to_string(input)
+            .context("Failed to read input text file. Ensure it is UTF-8.")?;
+        let root = lawnstrings::parse_lawn_strings(&content)?;
+
+        let out_path = match output {
+            Some(p) => p.clone(),
+            None => input.with_extension("json"),
+        };
+
+        fs::write(&out_path, serde_json::to_string_pretty(&root)?)?;
+        println!("Converted LawnStrings Text to JSON at {:?}", out_path);
+    }
+
+    Ok(())
+}
+
+fn convert_popfx(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
+    // Decode Binary -> JSON
+    let mut file = fs::File::open(input)?;
+    let popfx_info = popfx::decode_popfx(&mut file)?;
+
+    let out_path = match output {
+        Some(p) => p.clone(),
+        None => input.with_extension("json"),
+    };
+
+    fs::write(&out_path, serde_json::to_string_pretty(&popfx_info)?)?;
+    println!("Decoded POPFX binary to {:?}", out_path);
+    Ok(())
+}
+
+fn convert_bnk(_input: &Path, _output: &Option<PathBuf>, _no_extract: bool) -> anyhow::Result<()> {
+    /*
+    // Decode Binary -> JSON (+ extraction)
+    let mut file = fs::File::open(input)?;
+
+    let out_path = match output {
+        Some(p) => p.clone(),
+        None => input.with_extension("json"),
+    };
+
+    let out_dir = out_path.parent().unwrap_or(Path::new("."));
+
+    let extract_path = if no_extract { None } else { Some(out_dir) };
+
+    let bnk_info = bnk::decode_bnk(&mut file, extract_path)?;
+
+    fs::write(&out_path, serde_json::to_string_pretty(&bnk_info)?)?;
+    println!("Decoded BNK binary to {:?}", out_path);
+    if !no_extract && bnk_info.embedded_media.is_some() {
+        println!("  Extracted audio to {:?}/embedded_audio", out_dir);
+    }
+    */
+    println!("BNK conversion is momentarily unavailable due to module rewrite.");
+    Ok(())
+}
+
+fn convert_wem(
+    input: &Path,
+    output: &Option<PathBuf>,
+    codebooks: &Option<String>,
+    original: bool,
+) -> anyhow::Result<()> {
+    let mut file = fs::File::open(input)?;
+
+    // Determine output path/extension
+    // If original is true, we try to match the source format (ogg/m4a/wav).
+    // If original is false (default), we always output wav.
+
+    let extension = if output.is_none() {
+        if original {
+            // Smart detection
+            let mut peek_file = fs::File::open(input)?;
+            match wem::wav::get_wem_format(&mut peek_file) {
+                Ok(0xFFFF) => "ogg", // Vorbis -> OGG
+                Ok(0xAAC0) => "m4a", // AAC -> M4A
+                Ok(_) => "wav",      // Others -> WAV
+                Err(_) => "wav",
+            }
+        } else {
+            "wav"
+        }
+    } else {
+        // User provided output, we follow their extension or just use it as is?
+        // We actally use this to determine default extension if output is None.
+        // If output is Some, we use it directly later.
+        // But for clarity let's define a default here.
+        "wav"
+    };
+
+    let out_path = match output {
+        Some(p) => p.clone(),
+        None => input.with_extension(extension),
+    };
+
+    println!("Converting {:?} -> {:?}", input, out_path);
+
+    // Codebook handling (always needed for Vorbis, even repack)
+    let codebooks_lib = if let Some(path_str) = codebooks {
+        wem::CodebookLibrary::from_file(path_str).context("Failed to load external codebooks")?
+    } else {
+        wem::CodebookLibrary::embedded_aotuv()
+    };
+
+    // Conversion Logic
+    // If original is set, we try specialized paths.
+    // Otherwise we default to wem_to_wav (WAV decoding).
+
+    let mut format_tag = 0u16;
+
+    if original {
+        // We need format tag to decide
+        format_tag = wem::wav::get_wem_format(&mut file)?;
+        file.seek(std::io::SeekFrom::Start(0))?;
+    }
+
+    if original && format_tag == 0xFFFF {
+        // Vorbis -> OGG (Repack)
+        let mut converter =
+            wem::WwiseRiffVorbis::new(std::io::BufReader::new(file), codebooks_lib)?;
+        let mut out_file = fs::File::create(&out_path)?;
+        converter.generate_ogg(&mut out_file)?;
+        println!("Generated OGG (Re-packetized)");
+        return Ok(());
+    }
+
+    if original && format_tag == 0xAAC0 {
+        // AAC -> M4A (Extract)
+        // We need manually call extraction or export a method for it.
+        // wem_to_wav decodes now.
+        // We need to use crate::aac::extract_aac but we need offsets.
+        // Let's re-parse or use a helper?
+        // wem::wav::get_wem_format only gives tag.
+        // We need to parse chunks to find data.
+        // Let's implement a clean `extract_to_m4a` helper in wem?
+        // Or duplicate the seek logic here?
+        // Better to expose `extract_payload` in wem or use `aac::extract_aac`.
+
+        // Let's replicate the chunk scan quickly or (better) expose a helper in `wav.rs` or `lib.rs`.
+        // But for now, since we are inside logic, let's just use `wem_to_wav` if we can't easily extract?
+        // NO, user asked for M4A. wem_to_wav gives WAV.
+
+        // Let's implement manual extraction scan here since it's simple RIFF.
+        // OR add `wem::wav::extract_data(reader, output)` to the lib.
+        // I'll add `extract_wem_data` to `wem::wav` first.
+        // WAIT, I should check if I can modify `wem::wav` first.
+        // I will implement the extraction logic here for now to avoid switching files too much,
+        // unless it's complex. It's just scanning for 'data'.
+
+        // Actually, let's use a newly created helper in `wav.rs` in next step if needed.
+        // For now, I will use a simple scanner here.
+        // But wait, `aac::extract_aac` exists! I just need data offset/size.
+
+        let mut reader = std::io::BufReader::new(file);
+        let mut header = [0u8; 12];
+        reader.read_exact(&mut header)?;
+        // ... (RIFF check skipped as we know it's valid wem) ...
+
+        let mut current_offset = 12u64;
+        loop {
+            reader.seek(std::io::SeekFrom::Start(current_offset))?;
+            let mut chunk_header = [0u8; 8];
+            if reader.read_exact(&mut chunk_header).is_err() {
+                break;
+            }
+            let chunk_id = &chunk_header[0..4];
+            let chunk_size = u32::from_le_bytes(chunk_header[4..8].try_into().unwrap()); // Assume LE for now (Wwise usually LE)
+
+            if chunk_id == b"data" {
+                let data_offset = current_offset + 8;
+                let data_size = chunk_size;
+                let out_file = fs::File::create(&out_path)?;
+                // Re-open file for extraction or seek reader?
+                // reader is buffered, might be tricky with offset. Use underlying file?
+                // extract_aac takes generic reader.
+                // We need to seek back to start of file for extract_aac?
+                // No, extract_aac takes offset.
+
+                // We need distinct handle.
+                let extract_src = fs::File::open(input)?; // Re-open clean
+                wem::aac::extract_aac(extract_src, out_file, data_offset, data_size)?;
+                println!("Extracted AAC to M4A");
+                return Ok(());
+            }
+            current_offset += 8 + chunk_size as u64;
+            if chunk_size % 2 != 0 {
+                current_offset += 1;
+            }
+        }
+        // If data not found?
+        anyhow::bail!("Could not find data chunk for AAC extraction");
+    }
+
+    // Default: use wem_to_wav (Extract AAC / Decode others to WAV)
+    let reader = std::io::BufReader::new(fs::File::open(input)?);
+    let mut out_file = std::io::BufWriter::new(fs::File::create(&out_path)?);
+
+    wem::wav::wem_to_wav(reader, &mut out_file, &codebooks_lib)
+        .map_err(|e| anyhow::anyhow!("Conversion failed: {:?}", e))?;
+
+    Ok(())
+}
