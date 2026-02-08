@@ -309,6 +309,7 @@ pub struct WwiseRiffVorbis<R: Read + Seek> {
     mod_packets: bool,
     header_triad_present: bool,
     old_packet_headers: bool,
+    prefetch: bool,
 }
 
 impl<R: Read + Seek> WwiseRiffVorbis<R> {
@@ -370,7 +371,8 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         let riff_size = Self::read_u32_static(&mut input, little_endian)? as u64 + 8;
 
         if riff_size > file_size {
-            return Err(WemError::parse("RIFF truncated"));
+            // This is common for Wwise prefetch chunks (truncated files).
+            // We'll allow it and handle truncation during data reading.
         }
 
         let mut wave_head = [0u8; 4];
@@ -408,6 +410,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
             mod_packets: false,
             header_triad_present: false,
             old_packet_headers: false,
+            prefetch: false,
         };
 
         converter.read_chunks()?;
@@ -415,6 +418,43 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         converter.parse_cue_chunk()?;
         converter.parse_smpl_chunk()?;
         converter.parse_vorb_chunk(force_packet_format)?;
+
+        // Recalculate samples if prefetch
+        if converter.prefetch {
+            if let Some(_data) = converter.chunks.data {
+                // Ratio of available data vs expected data
+                // Expected data size is stored in the chunk_size we likely originally read,
+                // but we clamped it in read_chunks.
+                // We need to read the original size again or store it.
+                // Actually read_chunks already clamped it.
+                // Let's assume the original size was roughly intended to be cover the full samples.
+                // But wait, we don't know the original data chunk size because we clamped it!
+                // We should probably rely on `offset + size > file_size` check again?
+                // No, we modify `read_chunks` to clamp but we lost the original value.
+                // However, we can use `sample_count` and the known average bytes per sample? No Vorbis is VBR.
+
+                // Let's seek back to data chunk header to read original size?
+                // Or we could have stored `original_data_size` in the struct.
+                // For now, let's just use what vgmstream does:
+                // "ww.data_size = ww.file_size - ww.data_offset;" (Clamped size)
+                // "vgmstream->num_samples = ... * (file_size - start) / (original_data_size)"
+                // We need original data size.
+
+                // Re-read data chunk size
+                if let Some(data_loc) = converter.chunks.data {
+                    converter.input.seek(SeekFrom::Start(data_loc.offset - 4))?;
+                    let original_size = converter.read_u32()? as u64;
+
+                    if original_size > 0 {
+                        let avail_size = data_loc.size; // This is clamped
+                        // Avoiding float, use u64
+                        converter.sample_count =
+                            ((converter.sample_count as u64 * avail_size) / original_size) as u32;
+                    }
+                }
+            }
+        }
+
         converter.validate_loops()?;
 
         Ok(converter)
@@ -455,15 +495,24 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         let mut chunk_offset: u64 = 12;
 
         while chunk_offset < self.riff_size {
-            self.input.seek(SeekFrom::Start(chunk_offset))?;
-
-            if chunk_offset + 8 > self.riff_size {
-                return Err(WemError::parse("chunk header truncated"));
+            // Check if we are at EOF (even if we expected more RIFF data)
+            if chunk_offset >= self.file_size {
+                break;
             }
 
+            self.input.seek(SeekFrom::Start(chunk_offset))?;
+
+            // Try to read chunk header
             let mut chunk_type = [0u8; 4];
-            self.input.read_exact(&mut chunk_type)?;
-            let chunk_size = self.read_u32()? as u64;
+            if self.input.read_exact(&mut chunk_type).is_err() {
+                break; // EOF
+            }
+
+            // Should be able to read size
+            let chunk_size = match self.read_u32() {
+                Ok(s) => s as u64,
+                Err(_) => break, // EOF
+            };
 
             let data_offset = chunk_offset + 8;
             match &chunk_type {
@@ -483,7 +532,19 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
                     self.chunks.vorb = Some(ChunkLocation::new(data_offset, chunk_size));
                 }
                 b"data" => {
-                    self.chunks.data = Some(ChunkLocation::new(data_offset, chunk_size));
+                    // Check if data is truncated
+                    if data_offset + chunk_size > self.file_size {
+                        self.prefetch = true;
+                        // Clamp size to what's available
+                        let avail = if data_offset < self.file_size {
+                            self.file_size - data_offset
+                        } else {
+                            0
+                        };
+                        self.chunks.data = Some(ChunkLocation::new(data_offset, avail));
+                    } else {
+                        self.chunks.data = Some(ChunkLocation::new(data_offset, chunk_size));
+                    }
                 }
                 _ => {}
             }
@@ -491,9 +552,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
             chunk_offset = chunk_offset + 8 + chunk_size;
         }
 
-        if chunk_offset > self.riff_size {
-            return Err(WemError::parse("chunk truncated"));
-        }
+        // Removed strict check: if chunk_offset > self.riff_size { ... }
 
         if self.chunks.fmt.is_none() || self.chunks.data.is_none() {
             return Err(WemError::parse("expected fmt, data chunks"));
@@ -746,6 +805,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
             .ok_or_else(|| WemError::parse("missing data chunk"))?;
         let data_offset = data.offset;
         let data_size = data.size;
+        // data.size is already clamped to file_size in read_chunks if prefetch
         let data_end = data_offset + data_size;
 
         let mut packet_writer = PacketWriter::new(output);

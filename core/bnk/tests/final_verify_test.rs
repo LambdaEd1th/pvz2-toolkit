@@ -3,13 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[test]
-fn test_bulk_parse_test_output_bnks() {
+fn test_final_verify_bnks() {
     let mut root_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    root_path.push("../../../rsb-rs/test_output");
+    // Go up from core/bnk/tests -> core/bnk -> core -> pvz2-toolkit
+    root_path.push("../../test_output/final_verify");
 
     if !root_path.exists() {
         println!(
-            "Skipping bulk test: test_output not found at {:?}",
+            "Skipping final_verify test: directory not found at {:?}",
             root_path
         );
         return;
@@ -20,6 +21,11 @@ fn test_bulk_parse_test_output_bnks() {
     let mut bnk_files = Vec::new();
     collect_files(&root_path, "bnk", &mut bnk_files);
 
+    if bnk_files.is_empty() {
+        println!("No BNK files found in final_verify.");
+        return;
+    }
+
     println!("Found {} BNK files.", bnk_files.len());
 
     let mut successes = 0;
@@ -28,40 +34,46 @@ fn test_bulk_parse_test_output_bnks() {
 
     for path in &bnk_files {
         match fs::File::open(path) {
-            Ok(file) => {
-                match Bnk::new(file) {
-                    Ok(bnk) => {
-                        successes += 1;
-                        if bnk.data_index.is_empty() {
-                            // Warn but not error?
-                            // println!("Warning: {:?} parsed but has 0 entries", path.file_name());
-                        }
-                    }
-                    Err(e) => {
-                        failures += 1;
-                        errors.push(format!("Failed to parse {:?}: {:?}", path.file_name(), e));
-                    }
+            Ok(file) => match Bnk::new(file) {
+                Ok(_) => {
+                    successes += 1;
                 }
-            }
+                Err(e) => {
+                    failures += 1;
+                    errors.push(format!(
+                        "Failed to parse {:?}: {:?}",
+                        path.file_name().unwrap_or_default(),
+                        e
+                    ));
+                }
+            },
             Err(e) => {
                 failures += 1;
-                errors.push(format!("Failed to open {:?}: {:?}", path.file_name(), e));
+                errors.push(format!(
+                    "Failed to open {:?}: {:?}",
+                    path.file_name().unwrap_or_default(),
+                    e
+                ));
             }
         }
     }
 
-    println!("Bulk BNK Parse Results:");
+    println!("Final Verify Results:");
+    println!("  Total:     {}", bnk_files.len());
     println!("  Successes: {}", successes);
     println!("  Failures:  {}", failures);
 
     if !errors.is_empty() {
-        println!("\nFailures details (first 10):");
-        for err in errors.iter().take(10) {
+        println!("\nFailures details:");
+        for err in errors {
             println!("  - {}", err);
         }
     }
 
-    assert_eq!(failures, 0, "Some BNK files failed to parse");
+    assert_eq!(
+        failures, 0,
+        "Some BNK files in final_verify failed to parse"
+    );
 }
 
 fn collect_files(dir: &Path, extension: &str, results: &mut Vec<PathBuf>) {

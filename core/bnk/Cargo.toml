@@ -10,3 +10,6 @@ thiserror = "1.0"
 byteorder = "1.5"
 anyhow = "1.0"
 hex = "0.4"
+
+[dev-dependencies]
+wem = { path = "../wem" }

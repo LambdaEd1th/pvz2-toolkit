@@ -22,13 +22,13 @@ fn test_parse_bnk_from_output() {
     let bnk = result.unwrap();
 
     println!("Parsed BNK Header: {:?}", bnk.header);
-    println!("Found {} entries", bnk.entries.len());
+    println!("Found {} entries", bnk.data_index.len());
 
     assert!(bnk.header.id != 0, "BNK ID should not be zero");
     // Standard Wwise banks usually have at least some entries if they are SFX banks
     // GENERAL_ZOMBIE_INGAMESFX likely has embedded WEMs
 
-    if !bnk.entries.is_empty() {
-        println!("First entry: {:?}", bnk.entries[0]);
+    if !bnk.data_index.is_empty() {
+        println!("First entry: {:?}", bnk.data_index[0]);
     }
 }
