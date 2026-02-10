@@ -29,10 +29,10 @@
 //! # Ok::<(), wem::WemError>(())
 //! ```
 
-use crate::BitWriter;
-use crate::bit_reader::{BitRead, BitSliceReader};
+use crate::bit_stream::BitWriter;
+use crate::bit_stream::{BitRead, BitSliceReader};
 use crate::error::{WemError, WemResult};
-use crate::vorbis_helpers::{book_map_type1_quantvals, ilog};
+use crate::vorbis::helpers::{book_map_type1_quantvals, ilog};
 use std::path::Path;
 
 #[derive(Clone)]
@@ -68,13 +68,13 @@ impl CodebookLibrary {
 
     /// Load standard codebooks from embedded static arrays.
     pub fn embedded_standard() -> Self {
-        use crate::embedded_codebooks::standard::CODEBOOKS;
+        use crate::vorbis::embedded_codebooks::standard::CODEBOOKS;
         Self::from_static(CODEBOOKS)
     }
 
     /// Load aoTuV 6.03 codebooks from embedded static arrays.
     pub fn embedded_aotuv() -> Self {
-        use crate::embedded_codebooks::aotuv603::CODEBOOKS;
+        use crate::vorbis::embedded_codebooks::aotuv603::CODEBOOKS;
         Self::from_static(CODEBOOKS)
     }
 

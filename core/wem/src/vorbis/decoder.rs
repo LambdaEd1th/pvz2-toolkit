@@ -39,11 +39,11 @@
 //! ```
 
 use super::codebook::CodebookLibrary;
-use crate::BitWriter;
-use crate::bit_reader::BitReader;
+use crate::bit_stream::BitReader;
+use crate::bit_stream::BitWriter;
 use crate::error::{WemError, WemResult};
-use crate::packet::{Packet, Packet8};
-use crate::vorbis_helpers::ilog;
+use crate::vorbis::helpers::ilog;
+use crate::vorbis::packet::{Packet, Packet8};
 use ogg::{PacketWriteEndInfo, PacketWriter};
 use std::io::{Read, Seek, SeekFrom, Write};
 
@@ -1161,7 +1161,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         Ok((writer.into_inner(), mode_blockflag))
     }
 
-    fn rebuild_setup<B: crate::bit_reader::BitRead>(
+    fn rebuild_setup<B: crate::bit_stream::BitRead>(
         channels: u16,
         reader: &mut B,
         writer: &mut BitWriter,
@@ -1228,7 +1228,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         Ok((mode_blockflag, mode_bits))
     }
 
-    fn rebuild_floor<B: crate::bit_reader::BitRead>(
+    fn rebuild_floor<B: crate::bit_stream::BitRead>(
         reader: &mut B,
         codebook_count: u32,
         writer: &mut BitWriter,
@@ -1295,7 +1295,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         Ok(())
     }
 
-    fn rebuild_residue<B: crate::bit_reader::BitRead>(
+    fn rebuild_residue<B: crate::bit_stream::BitRead>(
         reader: &mut B,
         codebook_count: u32,
         writer: &mut BitWriter,
@@ -1361,7 +1361,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         Ok(())
     }
 
-    fn rebuild_mapping<B: crate::bit_reader::BitRead>(
+    fn rebuild_mapping<B: crate::bit_stream::BitRead>(
         channels: u16,
         reader: &mut B,
         floor_count: u32,

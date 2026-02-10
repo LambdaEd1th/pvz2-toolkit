@@ -2,30 +2,17 @@
 
 pub mod aac;
 pub mod adpcm;
-pub mod bit_reader;
-pub mod bit_writer;
-pub mod codebook;
-pub mod embedded_codebooks;
+pub mod bit_stream;
 pub mod error;
-pub mod ogg_to_wem;
-pub use ogg_to_wem::*;
-pub mod m4a_to_wem;
-pub use m4a_to_wem::*;
-pub mod wav_to_wem;
-pub use wav_to_wem::*;
-pub mod packet;
 pub mod pcm;
-
-pub mod vorbis_helpers;
+pub mod vorbis;
 pub mod wav;
-pub mod wwise_riff_vorbis;
 
-pub use bit_reader::*;
-pub use bit_writer::*;
-pub use codebook::*;
-pub use embedded_codebooks::*;
-pub use error::*;
-pub use packet::*;
+// Re-export specific types for convenience
+pub use error::WemError;
+pub use vorbis::codebook::CodebookLibrary;
+pub use vorbis::decoder::{ConversionOptions, ForcePacketFormat, WwiseRiffVorbis};
+pub use vorbis::encoder::OggToWem;
 
-pub use vorbis_helpers::*;
-pub use wwise_riff_vorbis::*;
+pub use aac::{M4aToWem, probe_m4a_metadata};
+pub use pcm::WavToWem;

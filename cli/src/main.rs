@@ -132,12 +132,15 @@ enum Commands {
     },
     /// Pack OGG file to WEM (RIFF/Vorbis Standard Header)
     PackWem {
-        /// Input OGG file
+        /// Input OGG/WAV file
         #[arg(short, long)]
         input: PathBuf,
         /// Output WEM file
         #[arg(short, long)]
         output: PathBuf,
+        /// Force ADPCM encoding (for WAV input)
+        #[arg(long)]
+        adpcm: bool,
     },
 }
 
@@ -241,7 +244,11 @@ fn main() -> anyhow::Result<()> {
             inline_codebooks,
         } => convert_wem(&input, &output, &codebooks, *inline_codebooks)?,
         Commands::RepackBnk { json, wems, output } => repack_bnk(json, wems, output)?,
-        Commands::PackWem { input, output } => pack_wem(input, output)?,
+        Commands::PackWem {
+            input,
+            output,
+            adpcm,
+        } => pack_wem(input, output, *adpcm)?,
     }
 
     Ok(())
@@ -866,7 +873,7 @@ fn convert_popfx(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn pack_wem(input: &Path, output: &Path) -> anyhow::Result<()> {
+fn pack_wem(input: &Path, output: &Path, adpcm: bool) -> anyhow::Result<()> {
     use anyhow::Context;
     let extension = input
         .extension()
@@ -891,12 +898,20 @@ fn pack_wem(input: &Path, output: &Path) -> anyhow::Result<()> {
         let mut out_file = fs::File::create(output)?;
         packer.process(&mut out_file)?;
     } else if extension == "wav" {
-        // WAV Path (PCM)
+        // WAV Path (PCM or ADPCM)
         println!("Packing WAV: {:?}", input);
         let file = fs::File::open(input)?;
-        let mut packer = wem::WavToWem::new(file)?;
         let mut out_file = fs::File::create(output)?;
-        packer.process(&mut out_file)?;
+
+        if adpcm {
+            println!("  Encoding to ADPCM...");
+            let mut packer = wem::adpcm::WavToAdpcm::new(file)?;
+            packer.process(&mut out_file)?;
+        } else {
+            println!("  Encoding to PCM...");
+            let mut packer = wem::WavToWem::new(file)?;
+            packer.process(&mut out_file)?;
+        }
     } else if extension == "ogg" || extension == "logg" {
         // OGG Path (Default)
         println!("Packing OGG: {:?}", input);
