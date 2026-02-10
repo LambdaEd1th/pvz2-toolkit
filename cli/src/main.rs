@@ -61,14 +61,6 @@ enum Commands {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Convert PAM file to XFL (Flash) project
-    ConvertPamXfl {
-        /// Input file
-        input: PathBuf,
-        /// Output directory (optional)
-        #[arg(short, long)]
-        output: Option<PathBuf>,
-    },
     /// Convert PAM file to HTML5 Canvas preview
     ConvertPamHtml {
         /// Input file
@@ -219,9 +211,6 @@ fn main() -> anyhow::Result<()> {
         }
         Commands::ConvertPam { input, output } => {
             convert_pam(input, output)?;
-        }
-        Commands::ConvertPamXfl { input, output } => {
-            convert_pam_xfl(input, output)?;
         }
         Commands::ConvertPamHtml { input, output } => {
             convert_pam_html(input, output)?;
@@ -785,21 +774,6 @@ fn convert_pam(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
 
     fs::write(&out_path, serde_json::to_string_pretty(&pam_info)?)?;
     println!("Decoded PAM binary to {:?}", out_path);
-    Ok(())
-}
-
-fn convert_pam_xfl(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
-    // Decode PAM -> XFL
-    let mut file = fs::File::open(input)?;
-    let pam_info = pam::decode_pam(&mut file)?;
-
-    let out_dir = match output {
-        Some(p) => p.clone(),
-        None => input.with_extension("XFL_PROJECT"),
-    };
-
-    pam::flash::convert_to_xfl(&pam_info, &out_dir)?;
-    println!("Converted PAM to XFL project at {:?}", out_dir);
     Ok(())
 }
 

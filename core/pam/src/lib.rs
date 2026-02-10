@@ -1,11 +1,9 @@
-use anyhow::{bail, Result};
-use byteorder::{ReadBytesExt, LE};
+use anyhow::{Result, bail};
+use byteorder::{LE, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek};
 
-pub mod flash;
 pub mod html5;
-pub mod xml_writer;
 
 pub const PAM_MAGIC: u32 = 0xBAF01954;
 
@@ -214,8 +212,8 @@ fn read_sprite_info<R: Read>(reader: &mut R, version: i32) -> Result<SpriteInfo>
     if version >= 5 {
         work_area[0] = reader.read_u16::<LE>()? as i32;
         work_area[1] = reader.read_u16::<LE>()? as i32; // Overwrites the default length if present? C# code says: `sprite.work_area[1] = framesCount;` afterwards.
-                                                        // Actually C# code reads it, but then immediately overwrites `work_area[1] = framesCount`.
-                                                        // We will replicate the read to advance the cursor, but respect the overwrite logic.
+    // Actually C# code reads it, but then immediately overwrites `work_area[1] = framesCount`.
+    // We will replicate the read to advance the cursor, but respect the overwrite logic.
     } else {
         work_area[0] = 0;
         work_area[1] = (frames_count as i32).saturating_sub(1);
