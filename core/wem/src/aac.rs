@@ -19,7 +19,7 @@ pub fn extract_aac<R: Read + Seek, W: Write>(
     Ok(())
 }
 
-pub fn extract_wem_aac<R: Read + Seek, W: Write>(mut input: R, mut output: W) -> WemResult<()> {
+pub fn extract_wem_aac<R: Read + Seek, W: Write>(mut input: R, output: W) -> WemResult<()> {
     // Scan for data chunk
     // Similar logic to wav::get_wem_format or wem_to_wav
     let mut current_offset = 12u64;

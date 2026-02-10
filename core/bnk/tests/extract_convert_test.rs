@@ -80,7 +80,6 @@ fn test_bulk_extract_and_convert() {
             let status_wem = Command::new(&cli_path)
                 .arg("convert-wem")
                 .arg(&wem_path)
-                .arg("--original") // OGG repacketization
                 .current_dir(&root_dir)
                 .status()
                 .expect("Failed to execute convert-wem");
@@ -347,7 +346,6 @@ fn test_pack_wem_round_trip() {
         .arg(&sample_wem)
         .arg("--output")
         .arg(&ogg_path)
-        .arg("--original")
         .current_dir(&root_dir)
         .status()
         .expect("Failed to convert WEM to OGG");
@@ -377,7 +375,6 @@ fn test_pack_wem_round_trip() {
         .arg(&packed_wem_path)
         .arg("--output")
         .arg(&verify_ogg_path)
-        .arg("--original")
         .arg("--inline-codebooks")
         .current_dir(&root_dir)
         .status()

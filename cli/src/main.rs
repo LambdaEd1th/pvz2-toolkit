@@ -104,19 +104,16 @@ enum Commands {
         #[arg(long)]
         no_extract: bool,
     },
-    /// Convert WEM file to OGG
+    /// Convert WEM file to OGG, M4A, or WAV
     ConvertWem {
-        /// Input file
+        /// Input WEM file
         input: PathBuf,
-        /// Output file (optional)
+        /// Output file (optional, defaults to matched extension)
         #[arg(short, long)]
         output: Option<PathBuf>,
         /// Codebooks file location (packed_codebooks_aoTuV_603.bin)
         #[arg(short, long)]
         codebooks: Option<String>,
-        /// Do not decode audio to WAV, extract original stream if possible (Vorbis -> OGG, AAC -> M4A)
-        #[arg(long)]
-        original: bool,
         /// Force inline codebooks (use if WEM has full setup header)
         #[arg(long)]
         inline_codebooks: bool,
@@ -241,9 +238,8 @@ fn main() -> anyhow::Result<()> {
             input,
             output,
             codebooks,
-            original,
             inline_codebooks,
-        } => convert_wem(input, output, codebooks, *original, *inline_codebooks)?,
+        } => convert_wem(&input, &output, &codebooks, *inline_codebooks)?,
         Commands::RepackBnk { json, wems, output } => repack_bnk(json, wems, output)?,
         Commands::PackWem { input, output } => pack_wem(input, output)?,
     }
@@ -901,7 +897,7 @@ fn pack_wem(input: &Path, output: &Path) -> anyhow::Result<()> {
         let mut packer = wem::WavToWem::new(file)?;
         let mut out_file = fs::File::create(output)?;
         packer.process(&mut out_file)?;
-    } else {
+    } else if extension == "ogg" || extension == "logg" {
         // OGG Path (Default)
         println!("Packing OGG: {:?}", input);
         let file = fs::File::open(input).context("Failed to open input OGG")?;
@@ -910,6 +906,8 @@ fn pack_wem(input: &Path, output: &Path) -> anyhow::Result<()> {
         packer
             .process(&mut out_file)
             .context("Failed to pack WEM")?;
+    } else {
+        anyhow::bail!("Unsupported file extension: .{}", extension);
     }
 
     println!("Packed WEM to {:?}", output);
@@ -978,42 +976,30 @@ fn convert_wem(
     input: &Path,
     output: &Option<PathBuf>,
     codebooks: &Option<String>,
-    original: bool,
     inline_codebooks: bool,
 ) -> anyhow::Result<()> {
     let mut file = fs::File::open(input)?;
 
-    // Determine output path/extension
-    // If original is true, we try to match the source format (ogg/m4a/wav).
-    // If original is false (default), we always output wav.
+    // Auto-detect format
+    let format_tag = wem::wav::get_wem_format(&mut file).unwrap_or(0);
+    file.seek(std::io::SeekFrom::Start(0))?;
 
-    let extension = if output.is_none() {
-        if original {
-            // Smart detection
-            let mut peek_file = fs::File::open(input)?;
-            match wem::wav::get_wem_format(&mut peek_file) {
-                Ok(0xFFFF) => "ogg", // Vorbis -> OGG
-                Ok(0xAAC0) => "m4a", // AAC -> M4A
-                Ok(_) => "wav",      // Others -> WAV
-                Err(_) => "wav",
-            }
-        } else {
-            "wav"
-        }
-    } else {
-        // User provided output, we follow their extension or just use it as is?
-        // We actally use this to determine default extension if output is None.
-        // If output is Some, we use it directly later.
-        // But for clarity let's define a default here.
-        "wav"
+    let default_extension = match format_tag {
+        0xFFFF => "ogg",          // Vorbis
+        0xAAC0 => "m4a",          // AAC
+        0x0001 | 0xFFFE => "wav", // PCM
+        _ => "wav",               // Default fallback
     };
 
     let out_path = match output {
         Some(p) => p.clone(),
-        None => input.with_extension(extension),
+        None => input.with_extension(default_extension),
     };
 
-    println!("Converting {:?} -> {:?}", input, out_path);
+    println!(
+        "Converting {:?} -> {:?} (Format: {:#06X})",
+        input, out_path, format_tag
+    );
 
     // Codebook handling (always needed for Vorbis, even repack)
     let codebooks_lib = if let Some(path_str) = codebooks {
@@ -1022,104 +1008,43 @@ fn convert_wem(
         wem::CodebookLibrary::embedded_aotuv()
     };
 
-    // Conversion Logic
-    // If original is set, we try specialized paths.
-    // Otherwise we default to wem_to_wav (WAV decoding).
+    let mut out_file = fs::File::create(&out_path)?;
 
-    let mut format_tag = 0u16;
+    match format_tag {
+        0xFFFF => {
+            // Vorbis -> OGG (Repack)
+            println!("  Format: Vorbis (repacking to OGG)");
+            // Use builder pattern to respect inline_codebooks
+            let mut converter =
+                wem::WwiseRiffVorbis::builder(std::io::BufReader::new(file), codebooks_lib)
+                    .inline_codebooks(inline_codebooks)
+                    .full_setup(inline_codebooks)
+                    .build()
+                    .map_err(|e| anyhow::anyhow!("Vorbis init failed: {:?}", e))?;
 
-    if original {
-        // We need format tag to decide
-        format_tag = wem::wav::get_wem_format(&mut file)?;
-        file.seek(std::io::SeekFrom::Start(0))?;
-    }
-
-    if original && format_tag == 0xFFFF {
-        // Vorbis -> OGG (Repack)
-        let mut converter =
-            wem::WwiseRiffVorbis::builder(std::io::BufReader::new(file), codebooks_lib)
-                .inline_codebooks(inline_codebooks)
-                .full_setup(inline_codebooks)
-                .build()?;
-        let mut out_file = fs::File::create(&out_path)?;
-        converter.generate_ogg(&mut out_file)?;
-        println!("Generated OGG (Re-packetized)");
-        return Ok(());
-    }
-
-    if original && format_tag == 0xAAC0 {
-        // AAC -> M4A (Extract)
-        // We need manually call extraction or export a method for it.
-        // wem_to_wav decodes now.
-        // We need to use crate::aac::extract_aac but we need offsets.
-        // Let's re-parse or use a helper?
-        // wem::wav::get_wem_format only gives tag.
-        // We need to parse chunks to find data.
-        // Let's implement a clean `extract_to_m4a` helper in wem?
-        // Or duplicate the seek logic here?
-        // Better to expose `extract_payload` in wem or use `aac::extract_aac`.
-
-        // Let's replicate the chunk scan quickly or (better) expose a helper in `wav.rs` or `lib.rs`.
-        // But for now, since we are inside logic, let's just use `wem_to_wav` if we can't easily extract?
-        // NO, user asked for M4A. wem_to_wav gives WAV.
-
-        // Let's implement manual extraction scan here since it's simple RIFF.
-        // OR add `wem::wav::extract_data(reader, output)` to the lib.
-        // I'll add `extract_wem_data` to `wem::wav` first.
-        // WAIT, I should check if I can modify `wem::wav` first.
-        // I will implement the extraction logic here for now to avoid switching files too much,
-        // unless it's complex. It's just scanning for 'data'.
-
-        // Actually, let's use a newly created helper in `wav.rs` in next step if needed.
-        // For now, I will use a simple scanner here.
-        // But wait, `aac::extract_aac` exists! I just need data offset/size.
-
-        let mut reader = std::io::BufReader::new(file);
-        let mut header = [0u8; 12];
-        reader.read_exact(&mut header)?;
-        // ... (RIFF check skipped as we know it's valid wem) ...
-
-        let mut current_offset = 12u64;
-        loop {
-            reader.seek(std::io::SeekFrom::Start(current_offset))?;
-            let mut chunk_header = [0u8; 8];
-            if reader.read_exact(&mut chunk_header).is_err() {
-                break;
-            }
-            let chunk_id = &chunk_header[0..4];
-            let chunk_size = u32::from_le_bytes(chunk_header[4..8].try_into().unwrap()); // Assume LE for now (Wwise usually LE)
-
-            if chunk_id == b"data" {
-                let data_offset = current_offset + 8;
-                let data_size = chunk_size;
-                let out_file = fs::File::create(&out_path)?;
-                // Re-open file for extraction or seek reader?
-                // reader is buffered, might be tricky with offset. Use underlying file?
-                // extract_aac takes generic reader.
-                // We need to seek back to start of file for extract_aac?
-                // No, extract_aac takes offset.
-
-                // We need distinct handle.
-                let extract_src = fs::File::open(input)?; // Re-open clean
-                wem::aac::extract_aac(extract_src, out_file, data_offset, data_size)?;
-                println!("Extracted AAC to M4A");
-                return Ok(());
-            }
-            current_offset += 8 + chunk_size as u64;
-            if chunk_size % 2 != 0 {
-                current_offset += 1;
-            }
+            converter
+                .generate_ogg(&mut out_file)
+                .map_err(|e| anyhow::anyhow!("OGG generation failed: {:?}", e))?;
         }
-        // If data not found?
-        anyhow::bail!("Could not find data chunk for AAC extraction");
+        0xAAC0 => {
+            // AAC -> M4A (Extract)
+            println!("  Format: AAC (extracting to M4A)");
+            // Read entire file to buffer for extraction
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            let cursor = std::io::Cursor::new(buffer);
+            wem::aac::extract_wem_aac(cursor, &mut out_file).context("Failed to extract AAC")?;
+        }
+        _ => {
+            // PCM/ADPCM -> WAV (Decode)
+            println!("  Format: PCM/ADPCM (decoding to WAV)");
+            let reader = std::io::BufReader::new(file);
+            // pass codebooks by reference
+            wem::wav::wem_to_wav(reader, &mut out_file, &codebooks_lib)
+                .map_err(|e| anyhow::anyhow!("WAV decoding failed: {:?}", e))?;
+        }
     }
 
-    // Default: use wem_to_wav (Extract AAC / Decode others to WAV)
-    let reader = std::io::BufReader::new(fs::File::open(input)?);
-    let mut out_file = std::io::BufWriter::new(fs::File::create(&out_path)?);
-
-    wem::wav::wem_to_wav(reader, &mut out_file, &codebooks_lib)
-        .map_err(|e| anyhow::anyhow!("Conversion failed: {:?}", e))?;
-
+    println!("Conversion successful: {:?}", out_path);
     Ok(())
 }
