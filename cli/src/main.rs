@@ -117,6 +117,9 @@ enum Commands {
         /// Do not decode audio to WAV, extract original stream if possible (Vorbis -> OGG, AAC -> M4A)
         #[arg(long)]
         original: bool,
+        /// Force inline codebooks (use if WEM has full setup header)
+        #[arg(long)]
+        inline_codebooks: bool,
     },
     /// Reconstruct a BNK file from JSON and WEM files
     RepackBnk {
@@ -127,6 +130,15 @@ enum Commands {
         #[arg(short = 'w', long)]
         wems: PathBuf,
         /// Output BNK file
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Pack OGG file to WEM (RIFF/Vorbis Standard Header)
+    PackWem {
+        /// Input OGG file
+        #[arg(short, long)]
+        input: PathBuf,
+        /// Output WEM file
         #[arg(short, long)]
         output: PathBuf,
     },
@@ -230,8 +242,10 @@ fn main() -> anyhow::Result<()> {
             output,
             codebooks,
             original,
-        } => convert_wem(input, output, codebooks, *original)?,
+            inline_codebooks,
+        } => convert_wem(input, output, codebooks, *original, *inline_codebooks)?,
         Commands::RepackBnk { json, wems, output } => repack_bnk(json, wems, output)?,
+        Commands::PackWem { input, output } => pack_wem(input, output)?,
     }
 
     Ok(())
@@ -856,6 +870,52 @@ fn convert_popfx(input: &Path, output: &Option<PathBuf>) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn pack_wem(input: &Path, output: &Path) -> anyhow::Result<()> {
+    use anyhow::Context;
+    let extension = input
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    if extension == "m4a" || extension == "aac" {
+        // M4A/AAC Path
+        println!("Packing M4A/AAC: {:?}", input);
+
+        // 1. Probe Metadata
+        let (channels, sample_rate, avg_bytes) = wem::probe_m4a_metadata(input)?;
+
+        println!("  Detected: {} Hz, {} Channels", sample_rate, channels);
+
+        // 2. Pack
+        let file = fs::File::open(input)?;
+        let mut packer = wem::M4aToWem::new(file)?;
+        packer.set_metadata(channels, sample_rate, avg_bytes);
+
+        let mut out_file = fs::File::create(output)?;
+        packer.process(&mut out_file)?;
+    } else if extension == "wav" {
+        // WAV Path (PCM)
+        println!("Packing WAV: {:?}", input);
+        let file = fs::File::open(input)?;
+        let mut packer = wem::WavToWem::new(file)?;
+        let mut out_file = fs::File::create(output)?;
+        packer.process(&mut out_file)?;
+    } else {
+        // OGG Path (Default)
+        println!("Packing OGG: {:?}", input);
+        let file = fs::File::open(input).context("Failed to open input OGG")?;
+        let mut packer = wem::OggToWem::new(file);
+        let mut out_file = fs::File::create(output).context("Failed to create output WEM")?;
+        packer
+            .process(&mut out_file)
+            .context("Failed to pack WEM")?;
+    }
+
+    println!("Packed WEM to {:?}", output);
+    Ok(())
+}
+
 fn unpack_bnk(input: &Path, output: &Option<PathBuf>, no_extract: bool) -> anyhow::Result<()> {
     let mut file = fs::File::open(input)?;
     let bnk = bnk::Bnk::new(&mut file).context("Failed to parse BNK")?;
@@ -919,6 +979,7 @@ fn convert_wem(
     output: &Option<PathBuf>,
     codebooks: &Option<String>,
     original: bool,
+    inline_codebooks: bool,
 ) -> anyhow::Result<()> {
     let mut file = fs::File::open(input)?;
 
@@ -976,7 +1037,10 @@ fn convert_wem(
     if original && format_tag == 0xFFFF {
         // Vorbis -> OGG (Repack)
         let mut converter =
-            wem::WwiseRiffVorbis::new(std::io::BufReader::new(file), codebooks_lib)?;
+            wem::WwiseRiffVorbis::builder(std::io::BufReader::new(file), codebooks_lib)
+                .inline_codebooks(inline_codebooks)
+                .full_setup(inline_codebooks)
+                .build()?;
         let mut out_file = fs::File::create(&out_path)?;
         converter.generate_ogg(&mut out_file)?;
         println!("Generated OGG (Re-packetized)");

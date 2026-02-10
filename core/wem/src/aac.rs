@@ -19,6 +19,48 @@ pub fn extract_aac<R: Read + Seek, W: Write>(
     Ok(())
 }
 
+pub fn extract_wem_aac<R: Read + Seek, W: Write>(mut input: R, mut output: W) -> WemResult<()> {
+    // Scan for data chunk
+    // Similar logic to wav::get_wem_format or wem_to_wav
+    let mut current_offset = 12u64;
+    let mut header = [0u8; 12];
+    input.seek(SeekFrom::Start(0))?;
+    input.read_exact(&mut header)?;
+
+    let is_little_endian = &header[0..4] == b"RIFF";
+    // Check RIFF/RIFX
+    if &header[0..4] != b"RIFF" && &header[0..4] != b"RIFX" {
+        return Err(WemError::parse("Not a RIFF/RIFX file"));
+    }
+
+    loop {
+        input.seek(SeekFrom::Start(current_offset))?;
+        let mut chunk_header = [0u8; 8];
+        if input.read_exact(&mut chunk_header).is_err() {
+            break;
+        }
+
+        let chunk_id = &chunk_header[0..4];
+        let chunk_size = if is_little_endian {
+            u32::from_le_bytes(chunk_header[4..8].try_into().unwrap())
+        } else {
+            u32::from_be_bytes(chunk_header[4..8].try_into().unwrap())
+        };
+
+        if chunk_id == b"data" {
+            let data_offset = current_offset + 8;
+            return extract_aac(input, output, data_offset, chunk_size);
+        }
+
+        current_offset += 8 + chunk_size as u64;
+        if chunk_size % 2 != 0 {
+            current_offset += 1;
+        }
+    }
+
+    Err(WemError::parse("data chunk not found"))
+}
+
 pub fn decode_aac_to_wav<R: Read + Seek + Send + Sync + 'static, W: Write + Seek>(
     mut input: R,
     output: W,

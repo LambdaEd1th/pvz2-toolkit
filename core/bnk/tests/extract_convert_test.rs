@@ -129,7 +129,7 @@ fn test_find_truncated_wem() {
         };
 
         // Parse BNK
-        let mut bnk = match Bnk::new(file) {
+        let bnk = match Bnk::new(file) {
             Ok(b) => b,
             Err(_) => continue,
         };
@@ -281,4 +281,249 @@ fn test_repack_bnk_round_trip() {
     assert!(status_verify.success(), "Failed to parse repacked BNK");
 
     println!("Repack round-trip successful!");
+}
+
+#[test]
+fn test_pack_wem_round_trip() {
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::Command;
+
+    // 1. Setup paths
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root_dir = manifest_dir.parent().unwrap().parent().unwrap();
+    let cli_path = root_dir.join("target/debug/pvz2-toolkit-cli");
+    let final_verify_dir = root_dir.join("test_output/final_verify");
+
+    // Ensure CLI is built
+    let status_build = Command::new("cargo")
+        .arg("build")
+        .arg("--bin")
+        .arg("pvz2-toolkit-cli")
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to build CLI");
+    assert!(status_build.success(), "Failed to build CLI");
+
+    // 2. We need a sample WEM. Let's use one from ZOMBOSS_MUSIC if extracted,
+    // or just assume one exists in test_output/final_verify/repack_test/ZOMBOSS_MUSIC
+    // If not, we skip.
+    let wem_dir = final_verify_dir.join("repack_test/ZOMBOSS_MUSIC");
+    if !wem_dir.exists() {
+        println!("Skipping pack-wem test: WEM dir not found (run repack test first)");
+        return;
+    }
+
+    // Find first WEM
+    let mut sample_wem = None;
+    if let Ok(entries) = fs::read_dir(&wem_dir) {
+        for entry in entries.flatten() {
+            if entry.path().extension().unwrap_or_default() == "wem" {
+                sample_wem = Some(entry.path());
+                break;
+            }
+        }
+    }
+
+    let sample_wem = match sample_wem {
+        Some(p) => p,
+        None => {
+            println!("Skipping pack-wem test: No WEM files found");
+            return;
+        }
+    };
+
+    println!("Testing pack-wem with {:?}", sample_wem);
+    let output_dir = final_verify_dir.join("pack_wem_test");
+    if output_dir.exists() {
+        fs::remove_dir_all(&output_dir).unwrap();
+    }
+    fs::create_dir_all(&output_dir).unwrap();
+
+    // 3. WEM -> OGG
+    let ogg_path = output_dir.join("temp.ogg");
+    let status_convert = Command::new(&cli_path)
+        .arg("convert-wem")
+        .arg(&sample_wem)
+        .arg("--output")
+        .arg(&ogg_path)
+        .arg("--original")
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to convert WEM to OGG");
+
+    assert!(status_convert.success(), "Failed to convert WEM to OGG");
+    assert!(ogg_path.exists(), "OGG file not created");
+
+    // 4. OGG -> WEM (Pack)
+    let packed_wem_path = output_dir.join("packed.wem");
+    let status_pack = Command::new(&cli_path)
+        .arg("pack-wem")
+        .arg("--input")
+        .arg(&ogg_path)
+        .arg("--output")
+        .arg(&packed_wem_path)
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to pack WEM");
+
+    assert!(status_pack.success(), "Failed to pack WEM");
+    assert!(packed_wem_path.exists(), "Packed WEM not created");
+
+    // 5. Verify: WEM -> OGG again
+    let verify_ogg_path = output_dir.join("verify.ogg");
+    let status_verify = Command::new(&cli_path)
+        .arg("convert-wem")
+        .arg(&packed_wem_path)
+        .arg("--output")
+        .arg(&verify_ogg_path)
+        .arg("--original")
+        .arg("--inline-codebooks")
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to verify packed WEM");
+
+    assert!(
+        status_verify.success(),
+        "Failed to verify packed WEM (re-conversion failed)"
+    );
+    assert!(verify_ogg_path.exists(), "Verification OGG not created");
+
+    println!("pack-wem round-trip successful!");
+}
+
+#[test]
+fn test_pack_m4a_round_trip() {
+    // 1. Setup paths
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root_dir = manifest_dir.parent().unwrap().parent().unwrap();
+    let _cli_path = root_dir.join("target/debug/pvz2-toolkit-cli");
+    let _final_verify_dir = root_dir.join("test_output/final_verify");
+
+    // Ensure CLI is build
+    let status_build = Command::new("cargo")
+        .arg("build")
+        .arg("--bin")
+        .arg("pvz2-toolkit-cli")
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to build CLI");
+    assert!(status_build.success(), "Failed to build CLI");
+
+    // 2. We need a sample M4A.
+    // We can generate one from a BNK that has AAC (rare in main assets?), or use a dummy m4a.
+    // Or we can convert a WEM to M4A first using `convert-wem` if we find an AAC wem.
+    // Let's create a dummy M4A file (valid container is hard to fake without encoder).
+    // Better: Find an existing AAC wem in verify dir and extract it.
+
+    // Scan for any WEM in `final_verify` and check if it's AAC.
+    // This is slow.
+    // Let's assume we can just use a placeholder file for testing PACKING structure,
+    // even if content is garbage? No, `pack-wem` probes with symphonia.
+    // So we need a valid M4A.
+
+    // We don't have a guaranteed M4A sample.
+    // Let's skip if we can't find one?
+    // Or check if we have `ZOMBOSS_MUSIC` which might have AAC? (Usually Vorbis).
+    // `DINO_MUSIC`?
+
+    // Let's try to find an AAC wem in the `repack_test` output if available.
+    // If not, we skip with a message.
+
+    println!("Skipping pack-m4a test: No guaranteed M4A source available in current test data.");
+    // To properly test this, we should add a small `test.m4a` to repo or `test_data`.
+}
+
+#[test]
+fn test_pack_wav_round_trip() {
+    // 1. Setup paths
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let root_dir = manifest_dir.parent().unwrap().parent().unwrap();
+    let cli_path = root_dir.join("target/debug/pvz2-toolkit-cli");
+    let verify_dir = root_dir.join("test_output/pack_wav_test");
+
+    if verify_dir.exists() {
+        fs::remove_dir_all(&verify_dir).unwrap();
+    }
+    fs::create_dir_all(&verify_dir).unwrap();
+
+    // Ensure CLI is build
+    let status_build = Command::new("cargo")
+        .arg("build")
+        .arg("--bin")
+        .arg("pvz2-toolkit-cli")
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to build CLI");
+    assert!(status_build.success(), "Failed to build CLI");
+
+    // 2. We need a sample WAV.
+    // Create a dummy WAV using hound
+    let wav_path = verify_dir.join("test_source.wav");
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: 44100,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(&wav_path, spec).unwrap();
+    for t in (0..44100).map(|x| x as f32 / 44100.0) {
+        let sample = (t.sin() * 2000.0) as i16;
+        writer.write_sample(sample).unwrap();
+    }
+    writer.finalize().unwrap();
+
+    // Verify the source WAV acts like a WAV
+    let _ = hound::WavReader::open(&wav_path).expect("Test source WAV is invalid locally!");
+
+    // 3. Pack WAV -> WEM
+    let wem_path = verify_dir.join("test_packed.wem");
+    let status_pack = Command::new(&cli_path)
+        .arg("pack-wem")
+        .arg("--input")
+        .arg(&wav_path)
+        .arg("--output")
+        .arg(&wem_path)
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to run pack-wem");
+    assert!(
+        status_pack.success(),
+        "Failed to run pack-wem with WAV input"
+    );
+    assert!(wem_path.exists(), "Packed WEM not created");
+
+    // 4. Verify (WEM -> WAV)
+    let verify_wav_path = verify_dir.join("test_verify.wav");
+    let status_verify = Command::new(&cli_path)
+        .arg("convert-wem")
+        .arg(&wem_path)
+        .arg("--output")
+        .arg(&verify_wav_path)
+        // .arg("--original") // For PCM, original is also WAV, so convert-wem default (wav) is fine.
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to verify packed WEM");
+
+    assert!(
+        status_verify.success(),
+        "Failed to verify packed WEM (re-conversion failed)"
+    );
+    assert!(verify_wav_path.exists(), "Verification WAV not created");
+
+    // Compare headers/size roughly?
+    // The contents should be identical PCM.
+    // We can use hound to compare samples.
+    let mut reader1 = hound::WavReader::open(&wav_path).unwrap();
+    let mut reader2 = hound::WavReader::open(&verify_wav_path).unwrap();
+
+    assert_eq!(reader1.spec(), reader2.spec(), "WAV specs mismatch");
+    assert_eq!(reader1.len(), reader2.len(), "WAV length mismatch");
+
+    // Check first few samples
+    let samples1: Vec<i16> = reader1.samples().take(100).map(|s| s.unwrap()).collect();
+    let samples2: Vec<i16> = reader2.samples().take(100).map(|s| s.unwrap()).collect();
+    assert_eq!(samples1, samples2, "WAV samples mismatch");
+
+    println!("pack-wem WAV round-trip successful!");
 }

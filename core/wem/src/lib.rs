@@ -7,6 +7,12 @@ pub mod bit_writer;
 pub mod codebook;
 pub mod embedded_codebooks;
 pub mod error;
+pub mod ogg_to_wem;
+pub use ogg_to_wem::*;
+pub mod m4a_to_wem;
+pub use m4a_to_wem::*;
+pub mod wav_to_wem;
+pub use wav_to_wem::*;
 pub mod packet;
 pub mod pcm;
 
