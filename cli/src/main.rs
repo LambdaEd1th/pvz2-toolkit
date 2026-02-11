@@ -134,6 +134,31 @@ enum Commands {
         #[arg(long)]
         adpcm: bool,
     },
+    /// VCDiff Patch Operations (RSBPatch)
+    #[command(subcommand)]
+    Patch(PatchCommands),
+}
+
+#[derive(Subcommand)]
+enum PatchCommands {
+    /// Create a patch from Source to Target
+    Create {
+        /// Source file (Dictionary/Original)
+        source: PathBuf,
+        /// Target file (New/Modified)
+        target: PathBuf,
+        /// Output Patch file
+        output: PathBuf,
+    },
+    /// Apply a patch to Source to get Target
+    Apply {
+        /// Source file (Dictionary/Original)
+        source: PathBuf,
+        /// Patch file
+        patch: PathBuf,
+        /// Output Target file
+        output: PathBuf,
+    },
 }
 
 #[derive(Serialize, Deserialize)]
@@ -238,6 +263,7 @@ fn main() -> anyhow::Result<()> {
             output,
             adpcm,
         } => pack_wem(input, output, *adpcm)?,
+        Commands::Patch(cmd) => handle_patch(cmd)?,
     }
 
     Ok(())
@@ -1035,5 +1061,42 @@ fn convert_wem(
     }
 
     println!("Conversion successful: {:?}", out_path);
+    Ok(())
+}
+
+fn handle_patch(cmd: &PatchCommands) -> anyhow::Result<()> {
+    match cmd {
+        PatchCommands::Create {
+            source,
+            target,
+            output,
+        } => {
+            let mut src_file = fs::File::open(source).context("Failed to open Source file")?;
+            let mut tgt_file = fs::File::open(target).context("Failed to open Target file")?;
+            let mut out_file = fs::File::create(output).context("Failed to create Output file")?;
+
+            println!(
+                "Creating patch (Interleaved): {:?} -> {:?} = {:?}",
+                source, target, output
+            );
+            patch::encode(&mut src_file, &mut tgt_file, &mut out_file)
+                .map_err(|e| anyhow::anyhow!("Patch creation failed: {:?}", e))?;
+            println!("Patch created successfully.");
+        }
+        PatchCommands::Apply {
+            source,
+            patch,
+            output,
+        } => {
+            let mut src_file = fs::File::open(source).context("Failed to open Source file")?;
+            let mut patch_file = fs::File::open(patch).context("Failed to open Patch file")?;
+            let mut out_file = fs::File::create(output).context("Failed to create Output file")?;
+
+            println!("Applying patch: {:?} + {:?} = {:?}", source, patch, output);
+            patch::decode(&mut src_file, &mut patch_file, &mut out_file)
+                .map_err(|e| anyhow::anyhow!("Patch application failed: {:?}", e))?;
+            println!("Patch applied successfully.");
+        }
+    }
     Ok(())
 }

@@ -18,6 +18,8 @@ pub enum PtxFormat {
     Pvrtc4BppRgba,
     Etc1,
     Pvrtc4BppRgbaA8,
+    Etc1A8,
+    Etc1Palette,
     Unknown(i32),
 }
 
@@ -31,8 +33,8 @@ impl From<i32> for PtxFormat {
             21 => PtxFormat::Rgba4444Block,
             22 => PtxFormat::Rgb565Block,
             23 => PtxFormat::Rgba5551Block,
-            30 => PtxFormat::Pvrtc4BppRgba,
-            147 => PtxFormat::Etc1,
+            30 => PtxFormat::Pvrtc4BppRgba, // Can also be Etc1Palette on iOS
+            147 => PtxFormat::Etc1,         // Can also be Etc1A8 on Android
             148 => PtxFormat::Pvrtc4BppRgbaA8,
             n => PtxFormat::Unknown(n),
         }
@@ -47,11 +49,34 @@ impl PtxDecoder {
         width: u32,
         height: u32,
         format_code: i32,
-        _alpha_size: Option<i32>, // TODO: Handle alpha if necessary
+        _alpha_size: Option<i32>,
         is_powervr: bool,
     ) -> Result<DynamicImage> {
-        let format = PtxFormat::from(format_code);
+        let mut format = PtxFormat::from(format_code);
         let num_pixels = (width * height) as usize;
+
+        // Resolve ambiguous formats based on data size
+        if format_code == 30 {
+            // ID 30: PVRTC 4bpp (Opaque) OR ETC1 Palette
+            // PVRTC size: (max(w, h)^2) / 2 (approx for square/pot, but strict calc needed)
+            // ETC1 Palette size: (w*h)/2 + 1 + 16 + ...
+            // Heuristic: If size is significantly larger than (w*h)/2, try Palette.
+            // Actually, PVRTC 4bpp is EXACTLY (w*h)/2 bits = (w*h)/2 bytes? NO. 4bpp = 0.5 bytes/pixel.
+            // ETC1 is also 0.5 bytes/pixel.
+            // So base size is same.
+            // ETC1 Palette has extra alpha data.
+            let expected_msg_size = (width * height) as usize / 2;
+            if data.len() > expected_msg_size + 16 {
+                // significantly larger
+                format = PtxFormat::Etc1Palette;
+            }
+        } else if format_code == 147 {
+            // ID 147: ETC1 (Opaque) OR ETC1 A8
+            let expected_opaque_size = (width * height) as usize / 2;
+            if data.len() >= expected_opaque_size + (width * height) as usize {
+                format = PtxFormat::Etc1A8;
+            }
+        }
 
         match format {
             PtxFormat::Rgba8888 => {
@@ -211,6 +236,10 @@ impl PtxDecoder {
                 let expected_data_len = packet_count * 8;
 
                 if data.len() < expected_data_len {
+                    // It might be a cropped PVRTC or non-square?
+                    // But assume standard PVRTC logic.
+                    // If size mismatch, maybe it really WAS Etc1Palette but heuristic failed?
+                    // But Logic above checks for larger size.
                     return Err(RsbError::DeserializationError(format!(
                         "Insufficient data for PVRTC: expected at least {}, got {}",
                         expected_data_len,
@@ -234,11 +263,6 @@ impl PtxDecoder {
                 // Copy with cropping
                 for y in 0..height {
                     for x in 0..width {
-                        // PVRTC decoder returns linear array but using Morton order?
-                        // No, decode_4bpp returns linear array in standard order?
-                        // Let's check decode_4bpp again.
-                        // It calculates `result_idx = ((py + (y << 2)) * width + px + (x << 2))`.
-                        // Yes, it returns standard row-major buffer.
                         let src_idx = (y * pot_width + x) as usize;
                         if src_idx < decoded_pixels.len() {
                             img_buf.put_pixel(x, y, decoded_pixels[src_idx].to_pixel());
@@ -264,7 +288,7 @@ impl PtxDecoder {
 
                 Ok(DynamicImage::ImageRgba8(img_buf))
             }
-            PtxFormat::Etc1 => {
+            PtxFormat::Etc1 | PtxFormat::Etc1A8 | PtxFormat::Etc1Palette => {
                 let expected_size_opaque = ((width * height) / 2) as usize;
 
                 if data.len() < expected_size_opaque {
@@ -296,9 +320,6 @@ impl PtxDecoder {
                                 let gy = y * 4 + py;
 
                                 if gx < width && gy < height {
-                                    // decoded_block is Column-Major (x*4 + y) or whatever my logic in etc1.rs handles.
-                                    // In etc1.rs: result[(i << 2) | j] = ... i=0..4 (x), j=0..4 (y).
-                                    // So index is x*4 + y.
                                     let pixel = decoded_block[px as usize * 4 + py as usize];
                                     img_buf.put_pixel(gx, gy, pixel.to_pixel());
                                 }
@@ -307,34 +328,23 @@ impl PtxDecoder {
                     }
                 }
 
-                // Check for Alpha (A8 or Palette)
-                let expected_size_a8 = expected_size_opaque + (width * height) as usize;
-
-                if data.len() >= expected_size_a8 {
-                    // Check if it matches A8 size exactly or if it's palette
-                    // The palette format size is variable.
-                    // A8 size is fixed.
-                    // If data.len() == expected_size_a8, assume A8.
-                    // The heuristic in C# isn't explicit, but A8 is common.
-                    // If we have palette data, the first byte is 'num'.
-
-                    if data.len() == expected_size_a8 {
-                        // Decode A8
+                if format == PtxFormat::Etc1A8 {
+                    let expected_size_a8 = expected_size_opaque + (width * height) as usize;
+                    if data.len() >= expected_size_a8 {
                         let alpha_data = &data[expected_size_opaque..];
                         for (i, pixel) in img_buf.pixels_mut().enumerate() {
                             pixel[3] = alpha_data[i];
                         }
-                    } else if data.len() > expected_size_opaque {
-                        // Try decoding as palette
-                        let alpha_data = &data[expected_size_opaque..];
-                        if let Ok(alphas) = crate::codec::etc1::decode_palette_alpha(
-                            alpha_data,
-                            (width * height) as usize,
-                        ) {
-                            for (i, pixel) in img_buf.pixels_mut().enumerate() {
-                                if i < alphas.len() {
-                                    pixel[3] = alphas[i];
-                                }
+                    }
+                } else if format == PtxFormat::Etc1Palette {
+                    let alpha_data = &data[expected_size_opaque..];
+                    if let Ok(alphas) = crate::codec::etc1::decode_palette_alpha(
+                        alpha_data,
+                        (width * height) as usize,
+                    ) {
+                        for (i, pixel) in img_buf.pixels_mut().enumerate() {
+                            if i < alphas.len() {
+                                pixel[3] = alphas[i];
                             }
                         }
                     }
@@ -343,7 +353,7 @@ impl PtxDecoder {
                 Ok(DynamicImage::ImageRgba8(img_buf))
             }
             _ => Err(RsbError::DeserializationError(format!(
-                "Unsupported PTX format: {:?}",
+                "Unsupported PTX format for decoding: {:?}",
                 format
             ))),
         }
@@ -356,15 +366,129 @@ impl PtxEncoder {
     pub fn encode(image: &DynamicImage, format: PtxFormat) -> Result<Vec<u8>> {
         let width = image.width();
         let height = image.height();
+        let img = image.to_rgba8();
 
         match format {
+            PtxFormat::Rgba8888 => {
+                // RGBA8888 (Direct copy)
+                // Sen encodes RGBA8888 as RGBA buffer.
+                Ok(img.into_raw())
+            }
+            PtxFormat::Rgba4444 => {
+                let mut out = Vec::with_capacity((width * height * 2) as usize);
+                for p in img.pixels() {
+                    let r = (p[0] >> 4) as u16;
+                    let g = (p[1] >> 4) as u16;
+                    let b = (p[2] >> 4) as u16;
+                    let a = (p[3] >> 4) as u16;
+                    let val = (r << 12) | (g << 8) | (b << 4) | a;
+                    out.extend_from_slice(&val.to_le_bytes());
+                }
+                Ok(out)
+            }
+            PtxFormat::Rgb565 => {
+                let mut out = Vec::with_capacity((width * height * 2) as usize);
+                for p in img.pixels() {
+                    let r = (p[0] >> 3) as u16;
+                    let g = (p[1] >> 2) as u16;
+                    let b = (p[2] >> 3) as u16;
+                    let val = (r << 11) | (g << 5) | b;
+                    out.extend_from_slice(&val.to_le_bytes());
+                }
+                Ok(out)
+            }
+            PtxFormat::Rgba5551 => {
+                let mut out = Vec::with_capacity((width * height * 2) as usize);
+                for p in img.pixels() {
+                    let r = (p[0] >> 3) as u16;
+                    let g = (p[1] >> 3) as u16;
+                    let b = (p[2] >> 3) as u16;
+                    let a = if p[3] > 0 { 1 } else { 0 };
+                    let val = (r << 11) | (g << 6) | (b << 1) | a;
+                    out.extend_from_slice(&val.to_le_bytes());
+                }
+                Ok(out)
+            }
+            PtxFormat::Rgba4444Block => {
+                let mut out = Vec::with_capacity((width * height * 2) as usize);
+                for y in (0..height).step_by(32) {
+                    for x in (0..width).step_by(32) {
+                        for j in 0..32 {
+                            for k in 0..32 {
+                                let py = y + j;
+                                let px = x + k;
+                                if py < height && px < width {
+                                    let p = img.get_pixel(px, py);
+                                    let r = (p[0] >> 4) as u16;
+                                    let g = (p[1] >> 4) as u16;
+                                    let b = (p[2] >> 4) as u16;
+                                    let a = (p[3] >> 4) as u16;
+                                    let val = (r << 12) | (g << 8) | (b << 4) | a;
+                                    out.extend_from_slice(&val.to_le_bytes());
+                                } else {
+                                    out.extend_from_slice(&0u16.to_le_bytes());
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(out)
+            }
+            PtxFormat::Rgb565Block => {
+                let mut out = Vec::with_capacity((width * height * 2) as usize);
+                for y in (0..height).step_by(32) {
+                    for x in (0..width).step_by(32) {
+                        for j in 0..32 {
+                            for k in 0..32 {
+                                let py = y + j;
+                                let px = x + k;
+                                if py < height && px < width {
+                                    let p = img.get_pixel(px, py);
+                                    let r = (p[0] >> 3) as u16;
+                                    let g = (p[1] >> 2) as u16;
+                                    let b = (p[2] >> 3) as u16;
+                                    let val = (r << 11) | (g << 5) | b;
+                                    out.extend_from_slice(&val.to_le_bytes());
+                                } else {
+                                    out.extend_from_slice(&0u16.to_le_bytes());
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(out)
+            }
+            PtxFormat::Rgba5551Block => {
+                let mut out = Vec::with_capacity((width * height * 2) as usize);
+                for y in (0..height).step_by(32) {
+                    for x in (0..width).step_by(32) {
+                        for j in 0..32 {
+                            for k in 0..32 {
+                                let py = y + j;
+                                let px = x + k;
+                                if py < height && px < width {
+                                    let p = img.get_pixel(px, py);
+                                    let r = (p[0] >> 3) as u16;
+                                    let g = (p[1] >> 3) as u16;
+                                    let b = (p[2] >> 3) as u16;
+                                    let a = if p[3] > 0 { 1 } else { 0 };
+                                    let val = (r << 11) | (g << 6) | (b << 1) | a;
+                                    out.extend_from_slice(&val.to_le_bytes());
+                                } else {
+                                    out.extend_from_slice(&0u16.to_le_bytes());
+                                }
+                            }
+                        }
+                    }
+                }
+                Ok(out)
+            }
             PtxFormat::Pvrtc4BppRgba | PtxFormat::Pvrtc4BppRgbaA8 => {
                 // Ensure dimensions are POT and square? PVRTC usually requires POT or at least blocks.
                 // Our implementation handles arbitrary size by blocks, but texture2ddecoder might have rules.
                 // The C# port assumes blocks.
 
-                let img_rgba = image.to_rgba8();
-                let pixels: Vec<crate::color::Rgba32> = img_rgba
+                let pixels: Vec<crate::color::Rgba32> = img
                     .pixels()
                     .map(|p| crate::color::Rgba32::from_pixel(*p))
                     .collect();
@@ -381,9 +505,8 @@ impl PtxEncoder {
                 }
                 Ok(out_data)
             }
-            PtxFormat::Etc1 => {
-                let img_rgba = image.to_rgba8();
-                let pixels: Vec<crate::color::Rgba32> = img_rgba
+            PtxFormat::Etc1 | PtxFormat::Etc1A8 | PtxFormat::Etc1Palette => {
+                let pixels: Vec<crate::color::Rgba32> = img
                     .pixels()
                     .map(|p| crate::color::Rgba32::from_pixel(*p))
                     .collect();
@@ -420,6 +543,24 @@ impl PtxEncoder {
                         // ETC1 is BE
                     }
                 }
+
+                if format == PtxFormat::Etc1A8 {
+                    // Extract Alpha channel
+                    let alpha_channel: Vec<u8> = img.pixels().map(|p| p[3]).collect();
+                    out_data.append(&mut crate::codec::etc1::encode_alpha(
+                        &alpha_channel,
+                        width,
+                        height,
+                    ));
+                } else if format == PtxFormat::Etc1Palette {
+                    let alpha_channel: Vec<u8> = img.pixels().map(|p| p[3]).collect();
+                    out_data.append(&mut crate::codec::etc1::encode_palette_alpha(
+                        &alpha_channel,
+                        width,
+                        height,
+                    ));
+                }
+
                 Ok(out_data)
             }
             _ => Err(RsbError::DeserializationError(format!(
@@ -464,6 +605,112 @@ mod tests {
             pixel_android,
             Rgba([255, 0, 0, 255]),
             "Default decoding (RGBA input) should result in Red pixel"
+        );
+    }
+
+    #[test]
+    fn test_ptx_encoding_sizes() {
+        let width = 64;
+        let height = 64;
+        let img = DynamicImage::new_rgba8(width, height);
+
+        // Rgba8888: 4 bytes per pixel
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba8888).unwrap();
+        assert_eq!(data.len(), (width * height * 4) as usize);
+
+        // Rgba4444: 2 bytes per pixel
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba4444).unwrap();
+        assert_eq!(data.len(), (width * height * 2) as usize);
+
+        // Rgb565: 2 bytes per pixel
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgb565).unwrap();
+        assert_eq!(data.len(), (width * height * 2) as usize);
+
+        // Rgba5551: 2 bytes per pixel
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba5551).unwrap();
+        assert_eq!(data.len(), (width * height * 2) as usize);
+
+        // Rgba4444Block: 2 bytes per pixel (no padding needed for 64x64)
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba4444Block).unwrap();
+        assert_eq!(data.len(), (width * height * 2) as usize);
+
+        // Rgb565Block: 2 bytes per pixel
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgb565Block).unwrap();
+        assert_eq!(data.len(), (width * height * 2) as usize);
+
+        // Rgba5551Block: 2 bytes per pixel
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba5551Block).unwrap();
+        assert_eq!(data.len(), (width * height * 2) as usize);
+
+        // Etc1: 0.5 bytes per pixel (4x4 block = 8 bytes)
+        let data = PtxEncoder::encode(&img, PtxFormat::Etc1).unwrap();
+        assert_eq!(data.len(), (width * height / 2) as usize);
+
+        // Etc1A8: Etc1 + 1 byte per pixel alpha
+        let data = PtxEncoder::encode(&img, PtxFormat::Etc1A8).unwrap();
+        assert_eq!(data.len(), (width * height / 2 + width * height) as usize);
+
+        // Etc1Palette: Etc1 + 1 header + 16 palette + 0.5 bytes per pixel alpha
+        let data = PtxEncoder::encode(&img, PtxFormat::Etc1Palette).unwrap();
+        let expected = (width * height / 2) + 1 + 16 + (width * height / 2);
+        assert_eq!(data.len(), expected as usize);
+    }
+
+    #[test]
+    fn test_ambiguous_format_resolution() {
+        // Test ID 147 (Etc1 vs Etc1A8)
+        let width = 8;
+        let height = 8;
+        let opaque_size = (width * height) / 2; // 32
+        let alpha_size = width * height; // 64
+
+        // Case 1: Just opaque data -> Should be Etc1
+        let data = vec![0u8; opaque_size as usize];
+        // We can't check internal format easily, but we can check if it errors or decodes.
+        // For Etc1, it should decode 4x4 opaque black (all zeros data -> somewhat valid ETC1 block).
+        let res = PtxDecoder::decode(&data, width, height, 147, None, false);
+        assert!(
+            res.is_ok(),
+            "ID 147 with opaque-only size should decode as ETC1"
+        );
+
+        // Case 2: Opaque + Alpha -> Should be Etc1A8
+        // fill opaque part with some data
+        let mut data_a8 = vec![0u8; (opaque_size + alpha_size) as usize];
+        // Fill alpha with 255 (opaque) to distinguish from zero-init (transparent)
+        for i in opaque_size as usize..data_a8.len() {
+            data_a8[i] = 255;
+        }
+        let res = PtxDecoder::decode(&data_a8, width, height, 147, None, false);
+        assert!(
+            res.is_ok(),
+            "ID 147 with alpha size should decode as Etc1A8"
+        );
+        // Check a pixel to see if alpha was read (opaque)
+        let img = res.unwrap();
+        assert_eq!(
+            img.to_rgba8().get_pixel(0, 0)[3],
+            255,
+            "Etc1A8 should read alpha channel"
+        );
+
+        // Test ID 30 (Pvrtc vs Etc1Palette)
+        // 8x8 PVRTC 4bpp = 32 bytes.
+
+        // Case 3: PVRTC size -> Pvrtc4Bpp
+        let pvrtc_data = vec![0u8; 32];
+        let res = PtxDecoder::decode(&pvrtc_data, width, height, 30, None, false);
+        assert!(res.is_ok(), "ID 30 with PVRTC size should decode as PVRTC");
+
+        // Case 4: Larger size -> Etc1Palette
+        // Etc1Palette size for 8x8: 32 (opaque) + 1 (header) + 16 (palette) + 32 (alpha data) = 81 bytes.
+        let mut palette_data = vec![0u8; 81];
+        // Set palette header to 0x10 (16 colors)
+        palette_data[32] = 0x10;
+        let res = PtxDecoder::decode(&palette_data, width, height, 30, None, false);
+        assert!(
+            res.is_ok(),
+            "ID 30 with larger size should decode as Etc1Palette"
         );
     }
 }

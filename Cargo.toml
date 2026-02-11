@@ -11,6 +11,7 @@ members = [
     "core/popfx",
     "core/bnk",
     "core/wem",
+    "core/patch",
 ]
 resolver = "2"
 

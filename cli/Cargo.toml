@@ -20,3 +20,4 @@ rayon = "1.11.0"
 popfx = { version = "0.1.0", path = "../core/popfx" }
 bnk = { version = "0.1.0", path = "../core/bnk" }
 wem = { version = "0.1.0", path = "../core/wem" }
+patch = { version = "0.1.0", path = "../core/patch" }

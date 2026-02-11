@@ -471,3 +471,72 @@ fn color_clamp_f(color: f32) -> u8 {
     }
     c as u8
 }
+
+pub fn encode_alpha(data: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity((width * height) as usize);
+    out.extend_from_slice(data);
+    out
+}
+
+pub fn encode_palette_alpha(data: &[u8], width: u32, height: u32) -> Vec<u8> {
+    // Standard fixed palette (0-15) mapping to (0x00, 0x11, ... 0xFF)
+    // Quantize alpha to 4 bits
+    let num_pixels = (width * height) as usize;
+    let mut out = Vec::with_capacity(1 + 16 + num_pixels / 2 + 1);
+
+    // Header: num = 16
+    out.push(0x10);
+    // Palette: 0..15
+    for i in 0..16 {
+        out.push(i as u8);
+    }
+
+    let mut writer = BitWriter::new();
+
+    for &alpha in data.iter().take(num_pixels) {
+        let val = alpha >> 4; // Quantize 8-bit to 4-bit
+        writer.write_bits(val as u32, 4);
+    }
+
+    out.append(&mut writer.flush());
+    out
+}
+
+struct BitWriter {
+    buffer: u8,
+    bit_pos: u8,
+    bytes: Vec<u8>,
+}
+
+impl BitWriter {
+    fn new() -> Self {
+        Self {
+            buffer: 0,
+            bit_pos: 0,
+            bytes: Vec::new(),
+        }
+    }
+
+    fn write_bits(&mut self, val: u32, bits: u8) {
+        // Decoder reads MSB first (i = bits-1 down to 0) from stream LSB first
+        // So we must write MSB of val to next bit position in buffer
+        for i in (0..bits).rev() {
+            let bit = (val >> i) & 1;
+            self.buffer |= (bit as u8) << self.bit_pos;
+            self.bit_pos += 1;
+            if self.bit_pos == 8 {
+                self.bytes.push(self.buffer);
+                self.buffer = 0;
+                self.bit_pos = 0;
+            }
+        }
+    }
+
+    fn flush(&mut self) -> Vec<u8> {
+        let mut res = std::mem::take(&mut self.bytes);
+        if self.bit_pos > 0 {
+            res.push(self.buffer);
+        }
+        res
+    }
+}
