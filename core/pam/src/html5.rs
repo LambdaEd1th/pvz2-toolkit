@@ -248,3 +248,37 @@ pub fn convert_to_html(pam: &PamInfo, output_path: &Path) -> Result<()> {
     fs::write(output_path, html_content)?;
     Ok(())
 }
+
+pub fn parse_html_pam(html_content: &str) -> Result<PamInfo> {
+    let start_marker = "const pamData = ";
+    let start = html_content
+        .find(start_marker)
+        .context("Could not find pamData in HTML")?
+        + start_marker.len();
+    let rest = &html_content[start..];
+
+    // Extract JSON object by balancing braces
+    let mut depth = 0;
+    let mut end = 0;
+    let mut found = false;
+    for (i, c) in rest.char_indices() {
+        if c == '{' {
+            depth += 1;
+            found = true;
+        } else if c == '}' {
+            depth -= 1;
+            if found && depth == 0 {
+                end = i + 1;
+                break;
+            }
+        }
+    }
+
+    if end == 0 {
+        anyhow::bail!("Could not extract JSON from HTML");
+    }
+
+    let json_str = &rest[..end];
+    let pam_info: PamInfo = serde_json::from_str(json_str)?;
+    Ok(pam_info)
+}

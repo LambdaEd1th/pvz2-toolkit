@@ -1,0 +1,560 @@
+use crate::error::Result;
+use crate::types::*;
+use byteorder::{LE, WriteBytesExt};
+use std::collections::HashMap;
+use std::io::{Seek, Write};
+
+pub struct RsbWriter<W: Write + Seek> {
+    pub writer: W,
+}
+
+impl<W: Write + Seek> RsbWriter<W> {
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+
+    pub fn write_header(&mut self, header: &RsbHeader) -> Result<()> {
+        self.writer.write_all(&header.magic)?;
+        self.writer.write_u32::<LE>(header.version)?;
+        self.writer.write_u32::<LE>(0)?; // Padding/reserved at 0x8? Sen reads 0
+        self.writer.write_u32::<LE>(header.file_offset)?;
+
+        self.writer.write_u32::<LE>(header.file_list_length)?;
+        self.writer.write_u32::<LE>(header.file_list_begin_offset)?;
+
+        // V4/V5 seems to reuse the padding area for data (observed: rsg_list_len, file_list_begin)
+        // or just non-zero garbage. We write rsg_list_len and file_list_begin to attempt match.
+        if header.version >= 4 {
+            self.writer.write_u32::<LE>(header.rsg_list_length)?; // Observed 1810 (rsg count)
+            self.writer.write_u32::<LE>(header.file_list_begin_offset)?; // Observed 112
+        } else {
+            self.writer.write_u64::<LE>(0)?; // Padding only for versions < 4
+        }
+
+        self.writer.write_u32::<LE>(header.rsg_list_length)?;
+        self.writer.write_u32::<LE>(header.rsg_list_begin_offset)?;
+        self.writer.write_u32::<LE>(header.rsg_number)?;
+        self.writer.write_u32::<LE>(header.rsg_info_begin_offset)?;
+        self.writer.write_u32::<LE>(header.rsg_info_each_length)?;
+
+        self.writer.write_u32::<LE>(header.composite_number)?;
+        self.writer
+            .write_u32::<LE>(header.composite_info_begin_offset)?;
+        self.writer
+            .write_u32::<LE>(header.composite_info_each_length)?;
+        self.writer.write_u32::<LE>(header.composite_list_length)?;
+        self.writer
+            .write_u32::<LE>(header.composite_list_begin_offset)?;
+
+        self.writer.write_u32::<LE>(header.autopool_number)?;
+        self.writer
+            .write_u32::<LE>(header.autopool_info_begin_offset)?;
+        self.writer
+            .write_u32::<LE>(header.autopool_info_each_length)?;
+
+        self.writer.write_u32::<LE>(header.ptx_number)?;
+        self.writer.write_u32::<LE>(header.ptx_info_begin_offset)?;
+        self.writer.write_u32::<LE>(header.ptx_info_each_length)?;
+
+        self.writer.write_u32::<LE>(header.part1_begin_offset)?;
+        self.writer.write_u32::<LE>(header.part2_begin_offset)?;
+        self.writer.write_u32::<LE>(header.part3_begin_offset)?;
+
+        // V4/V5 extra field logic was likely incorrect based on 112 byte header size.
+        // If 112 bytes, then NO extra field is possible (standard sum is 112 without pad).
+        // if header.version == 4 || header.version == 5 {
+        //     self.writer.write_u32::<LE>(header.file_offset)?;
+        // }
+
+        self.writer.write_u32::<LE>(header.packet_number)?;
+        self.writer
+            .write_u32::<LE>(header.packet_info_begin_offset)?;
+        self.writer
+            .write_u32::<LE>(header.packet_info_each_length)?;
+
+        Ok(())
+    }
+
+    pub fn write_resources_description(
+        &mut self,
+        desc: &ResourcesDescription,
+        header: &mut RsbHeader,
+    ) -> Result<()> {
+        // We need to generate Part 1, Part 2, Part 3.
+        // Part 3 is the string pool. Part 1 and 2 reference it.
+        // We'll write to temporary buffers first, then combine.
+
+        let mut part1_buf = Vec::new();
+        let mut part2_buf = Vec::new();
+        let mut part3_buf = Vec::new();
+
+        // Initialize string pool with empty string at offset 0
+        let mut string_pool: HashMap<String, u32> = HashMap::new();
+
+        // Helper to add string to pool and return offset
+        let mut add_string = |s: &str| -> std::io::Result<u32> {
+            if let Some(&off) = string_pool.get(s) {
+                Ok(off)
+            } else {
+                let off = part3_buf.len() as u32;
+                string_pool.insert(s.to_string(), off);
+                // Strings in Part 3 are null-terminated?
+                // Sen: writeStringByEmpty -> writes string + null? Or just string if empty?
+                // Sen: writeStringByEmpty() writes length-prefixed? No, SenBuffer string read/write usually varies.
+                // Sen Read: getStringByEmpty -> Reads until null or based on some structure.
+                // Sen Read: readStringByEmpty -> reads until \0.
+                // Sen Write: writeStringByEmpty -> Writes chars then \0.
+                // Let's assume null-terminated.
+                if s.is_empty() {
+                    part3_buf.write_u8(0)?;
+                } else {
+                    part3_buf.write_all(s.as_bytes())?;
+                    part3_buf.write_u8(0)?;
+                }
+                Ok(off)
+            }
+        };
+
+        // Initialize with empty string
+        add_string("")?;
+
+        // Sort keys for deterministic output (Sen does foreach on Keys, which is undefined order in C#,
+        // usually definition order or hash order. To be safe/stable, we sort).
+        // Sen source uses `resourcesDescription.groups.Keys` which comes from Dictionary.
+        // We should sort.
+
+        let mut group_keys: Vec<&String> = desc.groups.keys().collect();
+        group_keys.sort();
+
+        for g_key in group_keys {
+            let id_offset_part3 = add_string(g_key)?;
+            part1_buf.write_u32::<LE>(id_offset_part3)?;
+
+            let group = &desc.groups[g_key];
+            let mut subgroup_keys: Vec<&String> = group.subgroups.keys().collect();
+            subgroup_keys.sort();
+
+            part1_buf.write_u32::<LE>(subgroup_keys.len() as u32)?; // rsgNumber
+            part1_buf.write_u32::<LE>(0x10)?; // checkVal
+
+            for sub_key in subgroup_keys {
+                let sub = &group.subgroups[sub_key];
+
+                // Resolution ratio i32
+                let res_val = sub.res.parse::<i32>().unwrap_or(0);
+                part1_buf.write_i32::<LE>(res_val)?;
+
+                // Language 4 chars
+                let mut lang_bytes = sub.language.as_bytes().to_vec();
+                if lang_bytes.is_empty() {
+                    part1_buf.write_u32::<LE>(0)?;
+                } else {
+                    lang_bytes.resize(4, 0x20); // Pad with spaces if needed? Sen: "language + '    '".Substring(0,4)
+                    // Sen: if empty write 0, else write 4 chars.
+                    // The logic `(language + "    ")[..4]` implies space padding.
+                    part1_buf.write_all(&lang_bytes[..4])?;
+                }
+
+                let rsg_id_offset = add_string(sub_key)?;
+                part1_buf.write_u32::<LE>(rsg_id_offset)?;
+
+                let mut res_keys: Vec<&String> = sub.resources.keys().collect();
+                res_keys.sort();
+
+                part1_buf.write_u32::<LE>(res_keys.len() as u32)?; // resourcesNumber
+
+                for res_key in res_keys {
+                    let resource = &sub.resources[res_key];
+
+                    let info_offset_part2 = part2_buf.len() as u32;
+                    part1_buf.write_u32::<LE>(info_offset_part2)?;
+
+                    // Write Part 2 Entry
+                    part2_buf.write_u32::<LE>(0)?; // Check 0
+                    part2_buf.write_u16::<LE>(resource.res_type as u16)?;
+                    part2_buf.write_u16::<LE>(0x1C)?; // Check 0x1C
+
+                    // Placeholders for PTX offsets (written later)
+                    let ptx_offsets_pos = part2_buf.len();
+                    part2_buf.write_u32::<LE>(0)?; // End
+                    part2_buf.write_u32::<LE>(0)?; // Begin
+
+                    let res_id_off = add_string(res_key)?;
+                    let path_off = add_string(&resource.path)?;
+
+                    part2_buf.write_u32::<LE>(res_id_off)?;
+                    part2_buf.write_u32::<LE>(path_off)?;
+
+                    part2_buf.write_u32::<LE>(resource.properties.len() as u32)?;
+
+                    // Write PTX optional info
+                    if resource.res_type == 0 {
+                        let ptx_begin = part2_buf.len() as u32;
+                        if let Some(ptx) = &resource.ptx_info {
+                            part2_buf.write_u16::<LE>(ptx.imagetype.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.aflags.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.x.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.y.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.ax.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.ay.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.aw.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.ah.parse().unwrap_or(0))?;
+                            part2_buf.write_u16::<LE>(ptx.rows.parse().unwrap_or(1))?;
+                            part2_buf.write_u16::<LE>(ptx.cols.parse().unwrap_or(1))?;
+                            let parent_off = add_string(&ptx.parent)?;
+                            part2_buf.write_u32::<LE>(parent_off)?;
+                        }
+                        let ptx_end = part2_buf.len() as u32;
+
+                        // Go back and fill offsets
+                        // Write to vec by index
+                        // ptx_offsets_pos is index of End
+                        // ptx_offsets_pos + 4 is index of Begin
+                        let mut slice = &mut part2_buf[ptx_offsets_pos..ptx_offsets_pos + 8];
+                        slice.write_u32::<LE>(ptx_end)?;
+                        slice.write_u32::<LE>(ptx_begin)?;
+                    }
+
+                    // Write Properties
+                    let mut prop_keys: Vec<&String> = resource.properties.keys().collect();
+                    prop_keys.sort();
+
+                    for p_key in prop_keys {
+                        let val = &resource.properties[p_key];
+                        let k_off = add_string(p_key)?;
+                        let v_off = add_string(val)?;
+
+                        part2_buf.write_u32::<LE>(k_off)?;
+                        part2_buf.write_u32::<LE>(0)?; // padding/check? Sen reads 0 check here
+                        part2_buf.write_u32::<LE>(v_off)?;
+                    }
+                }
+            }
+        }
+
+        // Write buffers to writer and update header
+        // Align writer to verify?
+
+        header.part1_begin_offset = self.writer.stream_position()? as u32;
+        self.writer.write_all(&part1_buf)?;
+
+        header.part2_begin_offset = self.writer.stream_position()? as u32;
+        self.writer.write_all(&part2_buf)?;
+
+        header.part3_begin_offset = self.writer.stream_position()? as u32;
+        self.writer.write_all(&part3_buf)?;
+
+        Ok(())
+    }
+
+    pub fn write_file_list(&mut self, file_list: &Vec<FileListInfo>) -> Result<(u32, u32)> {
+        // Sort first
+        let mut sorted_list = file_list.clone();
+        sorted_list.sort_by(|a, b| a.name_path.cmp(&b.name_path));
+
+        let mut path_temp_list: Vec<RsbPathTemp> = Vec::new();
+
+        // Emulate FileListPack logic
+        // Insert dummy empty at start for comparison logic
+        let mut process_list = sorted_list.clone();
+        process_list.insert(
+            0,
+            FileListInfo {
+                name_path: "".to_string(),
+                pool_index: -1,
+            },
+        );
+
+        let list_length = process_list.len() - 1;
+        let mut w_position = 0;
+
+        for i in 0..list_length {
+            let path1 = process_list[i].name_path.to_uppercase();
+            let path2 = process_list[i + 1].name_path.to_uppercase();
+
+            // Validate ASCII - simplest check
+            if !path2.is_ascii() {
+                return Err(crate::error::RsbError::Other(
+                    "Item part must be ASCII".to_string(),
+                ));
+            }
+
+            let len1 = path1.len();
+            let len2 = path2.len();
+            let str_longest_length = std::cmp::max(len1, len2);
+
+            for k in 0..str_longest_length {
+                let char1 = if k < len1 { path1.as_bytes()[k] } else { 0 };
+                let char2 = if k < len2 { path2.as_bytes()[k] } else { 0 };
+
+                if k >= len1 || k >= len2 || char1 != char2 {
+                    // Found divergent point/end
+
+                    // Look for back-reference in path_temp_list
+                    let len_temp = path_temp_list.len();
+                    let mut matched_idx = None;
+
+                    for h in (0..len_temp).rev() {
+                        if k >= path_temp_list[h].key {
+                            matched_idx = Some(h);
+                            break;
+                        }
+                    }
+
+                    if let Some(h) = matched_idx {
+                        let key = path_temp_list[h].key;
+                        path_temp_list[h].positions.push(PathPosition {
+                            position: w_position,
+                            offset: k - key,
+                        });
+                    }
+
+                    w_position += (len2 - k) as u32 + 2; // +1 for string end? + around?
+
+                    path_temp_list.push(RsbPathTemp {
+                        path_slice: path2[k..].to_string(),
+                        key: k,
+                        pool_index: process_list[i + 1].pool_index,
+                        positions: Vec::new(),
+                    });
+                    break;
+                }
+            }
+        }
+
+        let start_offset = self.writer.stream_position()? as u32;
+
+        for temp in &path_temp_list {
+            self.write_file_list_entry(temp)?;
+        }
+
+        let end_offset = self.writer.stream_position()? as u32;
+        Ok((start_offset, end_offset - start_offset))
+    }
+
+    fn write_file_list_entry(&mut self, path_temp: &RsbPathTemp) -> Result<()> {
+        let begin_offset = self.writer.stream_position()?;
+
+        // Write string 4-byte encoded
+        for b in path_temp.path_slice.bytes() {
+            let encoded = (b.wrapping_mul(2)).wrapping_add(2);
+            self.writer.write_u8(encoded)?;
+            self.writer.write_u8(0)?; // Padding/Placeholder
+            self.writer.write_u8(0)?;
+            self.writer.write_u8(0)?;
+        }
+        // Null terminator equivalent (encoded 0 -> 2)
+        self.writer.write_u8(2)?;
+        self.writer.write_u8(0)?;
+        self.writer.write_u8(0)?;
+        self.writer.write_u8(0)?;
+
+        let current_pos = self.writer.stream_position()?;
+
+        // Patch positions
+        for pos in &path_temp.positions {
+            let patch_offset = begin_offset + (pos.offset as u64 * 4) + 1;
+            self.writer.seek(std::io::SeekFrom::Start(patch_offset))?;
+            self.writer.write_u24::<LE>(pos.position)?;
+        }
+
+        self.writer.seek(std::io::SeekFrom::Start(current_pos))?;
+        self.writer.write_i32::<LE>(path_temp.pool_index)?;
+
+        Ok(())
+    }
+
+    pub fn write_composite_info(
+        &mut self,
+        composite_info: &Vec<CompositeInfo>,
+    ) -> Result<(u32, u32)> {
+        let start_offset = self.writer.stream_position()? as u32;
+        let composite_number = composite_info.len() as u32;
+        let each_length = 1156;
+
+        for info in composite_info {
+            let item_start = self.writer.stream_position()?;
+
+            let name = if info.is_composite {
+                info.name.clone()
+            } else {
+                format!("{}_CompositeShell", info.name)
+            };
+
+            self.write_string_fixed(&name, 128)?;
+
+            // Skip to packet info
+            self.writer
+                .seek(std::io::SeekFrom::Start(item_start + 128))?;
+
+            for pkt in &info.packet_info {
+                self.writer.write_i32::<LE>(pkt.packet_index)?;
+                // Category[0] as int, Category[1] as string(4)
+                let cat0 = pkt.category[0].parse::<i32>().unwrap_or(0);
+                self.writer.write_i32::<LE>(cat0)?;
+
+                let mut cat1_bytes: [u8; 4] = [0u8; 4];
+                let bytes = pkt.category[1].as_bytes();
+                if bytes.len() > 0 {
+                    let len = std::cmp::min(bytes.len(), 4);
+                    cat1_bytes[..len].copy_from_slice(&bytes[..len]);
+                }
+                self.writer.write_all(&cat1_bytes)?;
+                self.writer.write_u32::<LE>(0)?; // Padding 4 bytes? Sen does writeNull(4) after
+            }
+
+            // Write subheader info at end of struct
+            self.writer.seek(std::io::SeekFrom::Start(
+                item_start + each_length as u64 - 8,
+            ))?;
+            // Padding checks in Sen: compositeInfo.writeNull(1024 - (subgroupLength * 16));
+            // Then writeInt32LE(subgroupLength);
+            // We need to match this layout.
+            // 128 (Name) + 16 * packet_info.len() + Padding + 4 (Count) = 1156?
+            // 128 + 1024 + 4 = 1156. Correct.
+
+            self.writer.write_u32::<LE>(0)?; // Padding? Sen writes at end-4
+            self.writer.write_u32::<LE>(info.packet_info.len() as u32)?;
+
+            // Fill padding if needed, but we seeked so spaces should be 0 if pre-allocated or we need to ensure size
+            let current = self.writer.stream_position()?;
+            if current < item_start + each_length as u64 {
+                let pad = (item_start + each_length as u64) - current;
+                self.writer.write_all(&vec![0u8; pad as usize])?;
+            }
+        }
+
+        let end_offset = self.writer.stream_position()? as u32;
+        // Verify alignment/size
+        if (end_offset - start_offset) != composite_number * each_length {
+            // Force alignment if needed, though loop should handle it
+        }
+
+        Ok((start_offset, each_length))
+    }
+
+    pub fn write_autopool_info(&mut self, autopool_info: &Vec<AutoPoolInfo>) -> Result<(u32, u32)> {
+        let start_offset = self.writer.stream_position()? as u32;
+        let each_length = 152;
+
+        for info in autopool_info {
+            let item_start = self.writer.stream_position()?;
+            self.write_string_fixed(&info.name, 128)?;
+
+            self.writer.write_u32::<LE>(info.part0_size)?;
+            self.writer.write_u32::<LE>(info.part1_size)?;
+
+            // Pad to next
+            let current = self.writer.stream_position()?;
+            let end = item_start + each_length as u64;
+            if current < end {
+                self.writer
+                    .write_all(&vec![0u8; (end - current) as usize])?;
+            }
+        }
+
+        Ok((start_offset, each_length))
+    }
+
+    // Refactored RSG Info Writer
+    pub fn write_rsg_info(
+        &mut self,
+        rsg_infos: &Vec<RsgInfo>,
+        ptx_counts: &Vec<(u32, u32)>,
+    ) -> Result<(u32, u32)> {
+        let start_offset = self.writer.stream_position()? as u32;
+        let each_length = 204;
+
+        for (i, info) in rsg_infos.iter().enumerate() {
+            let item_start = self.writer.stream_position()?;
+
+            self.write_string_fixed(&info.name, 128)?;
+
+            self.writer.write_u32::<LE>(info.rsg_offset)?;
+            self.writer.write_u32::<LE>(info.rsg_length)?;
+            self.writer.write_i32::<LE>(info.pool_index)?;
+
+            // PacketHeadInfo (32 bytes) - usually extracted from RSG
+            if let Some(head) = &info.packet_head_info {
+                if head.len() >= 32 {
+                    self.writer.write_all(&head[..32])?;
+                } else {
+                    self.writer.write_all(head)?;
+                    self.writer.write_all(&vec![0u8; 32 - head.len()])?;
+                }
+            } else {
+                self.writer.write_all(&[0u8; 32])?;
+            }
+
+            // Offsets and Size
+            // Sen writes:
+            // rsgInfo.writeInt32LE((int)RSGFile.readInt32LE(0x20), rsgWriteOffset - 36); --> This is inside packet head info area?
+            // rsgInfo.writeInt32LE(ptxNumber, rsgWriteOffset);
+            // rsgInfo.writeInt32LE(ptxBeforeNumber);
+
+            // We need to write ptx numbers at correct offset.
+            // 204 - 8 = 196 -> ptxNumber
+            // 200 -> ptxBeforeNumber
+
+            self.writer.seek(std::io::SeekFrom::Start(
+                item_start + each_length as u64 - 8,
+            ))?;
+
+            let (ptx_num, ptx_before) = ptx_counts[i];
+            self.writer.write_u32::<LE>(ptx_num)?;
+            self.writer.write_u32::<LE>(ptx_before)?;
+
+            // Ensure full size is written (pad if seek jumped forward, though seek handles it)
+            let end_packet = item_start + each_length as u64;
+            let current = self.writer.stream_position()?;
+            if current < end_packet {
+                self.writer
+                    .write_all(&vec![0u8; (end_packet - current) as usize])?;
+            }
+        }
+
+        Ok((start_offset, each_length))
+    }
+
+    pub fn write_ptx_info(&mut self, ptx_infos: &Vec<RsbPtxInfo>, each_len: u32) -> Result<u32> {
+        let start_offset = self.writer.stream_position()? as u32;
+
+        for info in ptx_infos {
+            self.writer.write_i32::<LE>(info.width)?;
+            self.writer.write_i32::<LE>(info.height)?;
+            self.writer.write_i32::<LE>(info.pitch)?;
+            self.writer.write_i32::<LE>(info.format)?;
+
+            if each_len >= 0x14 {
+                self.writer.write_i32::<LE>(info.alpha_size.unwrap_or(0))?;
+            }
+            if each_len >= 0x18 {
+                self.writer
+                    .write_i32::<LE>(info.alpha_format.unwrap_or(0))?;
+            }
+        }
+
+        Ok(start_offset)
+    }
+
+    fn write_string_fixed(&mut self, s: &str, len: usize) -> Result<()> {
+        let mut bytes = vec![0u8; len];
+        let src = s.as_bytes();
+        let copy_len = std::cmp::min(src.len(), len - 1); // Leave space for null? Sen writes nulls after string length
+        bytes[..copy_len].copy_from_slice(&src[..copy_len]);
+        self.writer.write_all(&bytes)?;
+        Ok(())
+    }
+}
+
+struct RsbPathTemp {
+    path_slice: String,
+    key: usize,
+    pool_index: i32,
+    positions: Vec<PathPosition>,
+}
+
+struct PathPosition {
+    position: u32,
+    offset: usize,
+}

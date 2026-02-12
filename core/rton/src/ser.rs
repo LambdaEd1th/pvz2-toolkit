@@ -97,25 +97,15 @@ impl<W: Write> RtonSerializer<W> {
     }
 }
 
-/// Serializes the given data structure to a RTON byte vector.
-pub fn to_bytes<T: Serialize>(value: &T) -> Result<Vec<u8>> {
-    to_bytes_with_key(value, None)
-}
-
 /// Serializes the given data structure to a RTON byte vector, with optional encryption key.
-pub fn to_bytes_with_key<T: Serialize>(value: &T, key_seed: Option<&str>) -> Result<Vec<u8>> {
+pub fn to_bytes<T: Serialize>(value: &T, key_seed: Option<&str>) -> Result<Vec<u8>> {
     let mut data = Vec::new();
-    to_writer_with_key(&mut data, value, key_seed)?;
+    to_writer(&mut data, value, key_seed)?;
     Ok(data)
 }
 
-/// Serializes the given data structure as RTON into the IO stream.
-pub fn to_writer<W: Write, T: Serialize>(writer: W, value: &T) -> Result<()> {
-    to_writer_with_key(writer, value, None)
-}
-
 /// Serializes the given data structure as RTON into the IO stream, with optional encryption key.
-pub fn to_writer_with_key<W: Write, T: Serialize>(
+pub fn to_writer<W: Write, T: Serialize>(
     mut writer: W,
     value: &T,
     key_seed: Option<&str>,
@@ -127,7 +117,8 @@ pub fn to_writer_with_key<W: Write, T: Serialize>(
         // Serialize content to buffer first
         let mut buffer = Vec::new();
         // Inner serialization writes standard RTON header + content + footer
-        to_writer(&mut buffer, value)?;
+        // Recursively call to_writer with None key for inner unencrypted content
+        to_writer(&mut buffer, value, None)?;
 
         // Encrypt buffer
         let digest = md5::compute(key_str).0;

@@ -27,6 +27,9 @@ pub struct RsbHeader {
     pub part1_begin_offset: u32,
     pub part2_begin_offset: u32,
     pub part3_begin_offset: u32,
+    pub packet_number: u32,
+    pub packet_info_begin_offset: u32,
+    pub packet_info_each_length: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -67,7 +70,7 @@ pub struct AutoPoolInfo {
     pub part1_size: u32,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RsbPtxInfo {
     pub ptx_index: i32,
     pub width: i32,
@@ -120,4 +123,58 @@ pub struct PropertiesPtxInfo {
     pub rows: String,
     pub cols: String,
     pub parent: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RsbManifest {
+    pub version: u32,
+    pub ptx_info_size: u32,
+    pub path: RsbPathInfo,
+    pub group: Vec<ManifestGroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RsbPathInfo {
+    pub rsgs: Vec<String>,
+    pub packet_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestGroup {
+    pub name: String,
+    pub is_composite: bool,
+    pub subgroup: Vec<ManifestSubgroup>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestSubgroup {
+    pub name_packet: String,
+    pub category: [String; 2],
+    pub packet_info: ManifestPacketInfo,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestPacketInfo {
+    pub version: u32,
+    pub compression_flags: u32,
+    pub res: Vec<ManifestRes>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestRes {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ptx_info: Option<RsbPtxInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ptx_property: Option<ManifestPtxProperty>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManifestPtxProperty {
+    pub format: i32,
+    pub pitch: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_size: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alpha_format: Option<i32>,
 }

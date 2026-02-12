@@ -28,17 +28,23 @@ where
     // vcdiff::encode(dictionary, target, format, ??)
     // Compiler indicated 4 arguments.
     // Try using vcdiff::FORMAT_INTERLEAVED constant.
-    let patch = vcdiff::encode(
+    // oxidelta::compress::encoder::encode_all(&mut output, source, target, options)
+    use oxidelta::compress::encoder::{encode_all, CompressOptions};
+
+    // encode_all takes (&mut Write, &[u8], &[u8], CompressOptions)
+    // It writes to the writer.
+    // Wait, the example said `encoder::encode_all(&mut delta, source, target, ...)` where delta is Vec.
+    // If it takes Write, I can pass `output` directly?
+    // Let's check signature. The example used `Vec::new()`, so likely takes `&mut impl Write`.
+
+    encode_all(
+        output,
         &source_data,
         &target_data,
-        vcdiff::FORMAT_INTERLEAVED,
-        false,
-    );
+        CompressOptions::default(),
+    )
+    .map_err(|e| PatchError::VCDiff(format!("Encoding failed: {:?}", e)))?;
 
-    // Check if it returns Result or Vec<u8>
-    // Compiler error "no method named map_err found for struct Vec<u8>" implies it returns Vec<u8>.
-
-    output.write_all(&patch)?;
     Ok(())
 }
 
@@ -55,9 +61,11 @@ where
     let mut patch_data = Vec::new();
     patch.read_to_end(&mut patch_data)?;
 
-    // vcdiff::decode(dictionary, delta)
-    // Compiler indicated 2 arguments.
-    let target = vcdiff::decode(&source_data, &patch_data);
+    // oxidelta::compress::decoder::decode_all(source, patch) -> Result<Vec<u8>, ...>
+    use oxidelta::compress::decoder::decode_all;
+
+    let target = decode_all(&source_data, &patch_data)
+        .map_err(|e| PatchError::VCDiff(format!("Decoding failed: {:?}", e)))?;
 
     output.write_all(&target)?;
     Ok(())

@@ -1,4 +1,4 @@
-use byteorder::{ReadBytesExt, LE};
+use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, SeekFrom, Write};
 use thiserror::Error;
@@ -397,11 +397,275 @@ fn read_string_from_buffer(buf: &[u8], offset: usize) -> Result<String> {
     Ok(s)
 }
 
-pub fn encode_popfx<W: Write + Seek>(
-    _obj: &PopcapRenderEffectObject,
-    _writer: &mut W,
-) -> Result<()> {
-    // Placeholder. User only asked for parsing, but I can implement structure if needed.
-    // For now, let's focus on decode.
+pub fn encode_popfx<W: Write + Seek>(obj: &PopcapRenderEffectObject, writer: &mut W) -> Result<()> {
+    // 1. Gather Strings from Block 3
+    // We need to deduplicate strings and assign them offsets in the string section.
+    // Map string -> offset
+    let mut string_map = std::collections::HashMap::new();
+    let mut string_section = Vec::new();
+
+    // The string section starts with an empty string (offset 0)?
+    // Or just strings packed. null terminated.
+    // C# `readStringByEmpty` implies null termination.
+    // We can just pack them one by one.
+
+    for b3 in &obj.block_3 {
+        if !string_map.contains_key(&b3.string) {
+            let offset = string_section.len() as u32;
+            string_section.extend_from_slice(b3.string.as_bytes());
+            string_section.push(0); // Null terminator
+            string_map.insert(b3.string.clone(), offset);
+        }
+    }
+
+    // 2. Calculate Offsets and Counts
+    // Header size: 4 (Magic) + 4 (Version) + 8 * (4+4+4) (Block Table) + 4 (StringSectionOffset)
+    // = 8 + 96 + 4 = 108 bytes.
+
+    let header_size = 108u32;
+    let mut current_offset = header_size;
+
+    let mut counts = [0u32; 8];
+    let mut offsets = [0u32; 8];
+    let sizes = BLOCK_SIZES; // Copy
+
+    // Block 1
+    counts[0] = obj.block_1.len() as u32;
+    if counts[0] > 0 {
+        offsets[0] = current_offset;
+        current_offset += counts[0] * sizes[0];
+    }
+
+    // Block 2
+    counts[1] = obj.block_2.len() as u32;
+    if counts[1] > 0 {
+        offsets[1] = current_offset;
+        current_offset += counts[1] * sizes[1];
+    }
+
+    // Block 3
+    counts[2] = obj.block_3.len() as u32;
+    if counts[2] > 0 {
+        offsets[2] = current_offset;
+        current_offset += counts[2] * sizes[2];
+    }
+
+    // Block 4
+    counts[3] = obj.block_4.len() as u32;
+    if counts[3] > 0 {
+        offsets[3] = current_offset;
+        current_offset += counts[3] * sizes[3];
+    }
+
+    // Block 5
+    counts[4] = obj.block_5.len() as u32;
+    if counts[4] > 0 {
+        offsets[4] = current_offset;
+        current_offset += counts[4] * sizes[4];
+    }
+
+    // Block 6
+    counts[5] = obj.block_6.len() as u32;
+    if counts[5] > 0 {
+        offsets[5] = current_offset;
+        current_offset += counts[5] * sizes[5];
+    }
+
+    // Block 7
+    counts[6] = obj.block_7.len() as u32;
+    if counts[6] > 0 {
+        offsets[6] = current_offset;
+        current_offset += counts[6] * sizes[6];
+    }
+
+    // Block 8
+    counts[7] = obj.block_8.len() as u32;
+    if counts[7] > 0 {
+        offsets[7] = current_offset;
+        current_offset += counts[7] * sizes[7];
+    }
+
+    let string_section_offset = current_offset;
+
+    // 3. Write Header
+    writer.write_all(b"xfcp")?;
+    writer.write_u32::<LE>(1)?; // Version
+
+    for i in 0..8 {
+        writer.write_u32::<LE>(counts[i])?;
+        writer.write_u32::<LE>(offsets[i])?;
+        writer.write_u32::<LE>(sizes[i])?;
+    }
+
+    writer.write_u32::<LE>(string_section_offset)?;
+
+    // 4. Write Blocks
+
+    // Block 1
+    if counts[0] > 0 {
+        writer.seek(SeekFrom::Start(offsets[0] as u64))?;
+        for b in &obj.block_1 {
+            writer.write_u32::<LE>(b.unknown_1)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+            writer.write_u32::<LE>(b.unknown_3)?;
+            writer.write_u32::<LE>(b.unknown_4)?;
+            writer.write_u32::<LE>(b.unknown_5)?;
+            writer.write_u32::<LE>(b.unknown_6)?;
+        }
+    }
+
+    // Block 2
+    if counts[1] > 0 {
+        writer.seek(SeekFrom::Start(offsets[1] as u64))?;
+        for b in &obj.block_2 {
+            writer.write_u32::<LE>(b.unknown_1)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+        }
+    }
+
+    // Block 3
+    if counts[2] > 0 {
+        writer.seek(SeekFrom::Start(offsets[2] as u64))?;
+        for b in &obj.block_3 {
+            // Write Length? Unknown2? Offset?
+            // From read:
+            // _len = read_u32
+            // unknown_2 = read_u32
+            // offset = read_u32
+
+            // What is _len? Block size? Or String length?
+            // C# ignores it. Let's write 0 or string len?
+            // "String length" makes sense if it's a string entry.
+            writer.write_u32::<LE>(b.string.len() as u32)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+            let offset = string_map.get(&b.string).unwrap_or(&0);
+            writer.write_u32::<LE>(*offset)?;
+        }
+    }
+
+    // Block 4
+    if counts[3] > 0 {
+        writer.seek(SeekFrom::Start(offsets[3] as u64))?;
+        for b in &obj.block_4 {
+            writer.write_u32::<LE>(b.unknown_1)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+            writer.write_u32::<LE>(b.unknown_3)?;
+            writer.write_u32::<LE>(b.unknown_4)?;
+            writer.write_u32::<LE>(b.unknown_5)?;
+        }
+    }
+
+    // Block 5
+    if counts[4] > 0 {
+        writer.seek(SeekFrom::Start(offsets[4] as u64))?;
+        for b in &obj.block_5 {
+            writer.write_u32::<LE>(b.unknown_1)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+            writer.write_u32::<LE>(b.unknown_3)?;
+            writer.write_u32::<LE>(b.unknown_4)?;
+            writer.write_u32::<LE>(b.unknown_5)?;
+            writer.write_u32::<LE>(b.unknown_6)?;
+            writer.write_u32::<LE>(b.unknown_7)?;
+        }
+    }
+
+    // Block 6
+    if counts[5] > 0 {
+        writer.seek(SeekFrom::Start(offsets[5] as u64))?;
+        for b in &obj.block_6 {
+            writer.write_u32::<LE>(b.unknown_1)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+            writer.write_u32::<LE>(b.unknown_3)?;
+            writer.write_u32::<LE>(b.unknown_4)?;
+            writer.write_u32::<LE>(b.unknown_5)?;
+        }
+    }
+
+    // Block 7
+    if counts[6] > 0 {
+        writer.seek(SeekFrom::Start(offsets[6] as u64))?;
+        for b in &obj.block_7 {
+            writer.write_u32::<LE>(b.unknown_1)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+        }
+    }
+
+    // Block 8
+    if counts[7] > 0 {
+        writer.seek(SeekFrom::Start(offsets[7] as u64))?;
+        for b in &obj.block_8 {
+            writer.write_u32::<LE>(b.unknown_1)?;
+            writer.write_u32::<LE>(b.unknown_2)?;
+            writer.write_u32::<LE>(b.unknown_3)?;
+            writer.write_u32::<LE>(b.unknown_4)?;
+            writer.write_u32::<LE>(b.unknown_5)?;
+        }
+    }
+
+    // 5. Write String Section
+    writer.seek(SeekFrom::Start(string_section_offset as u64))?;
+    writer.write_all(&string_section)?;
+
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_popfx_round_trip() {
+        // Create a sample object
+        let original = PopcapRenderEffectObject {
+            block_1: vec![Block1 {
+                unknown_1: 1,
+                unknown_2: 2,
+                unknown_3: 3,
+                unknown_4: 4,
+                unknown_5: 5,
+                unknown_6: 6,
+            }],
+            block_2: vec![Block2 {
+                unknown_1: 7,
+                unknown_2: 8,
+            }],
+            block_3: vec![
+                Block3 {
+                    unknown_2: 9,
+                    string: "test_string_1".to_string(),
+                },
+                Block3 {
+                    unknown_2: 10,
+                    string: "test_string_2".to_string(),
+                },
+                Block3 {
+                    unknown_2: 11,
+                    string: "test_string_1".to_string(), // Duplicate to test dedup
+                },
+            ],
+            block_4: vec![],
+            block_5: vec![],
+            block_6: vec![],
+            block_7: vec![],
+            block_8: vec![],
+        };
+
+        // Encode
+        let mut buffer = Cursor::new(Vec::new());
+        encode_popfx(&original, &mut buffer).expect("Encoding failed");
+
+        // Decode
+        buffer.set_position(0);
+        let decoded = decode_popfx(&mut buffer).expect("Decoding failed");
+
+        // Verify
+        assert_eq!(decoded.block_1.len(), original.block_1.len());
+        assert_eq!(decoded.block_1[0].unknown_1, original.block_1[0].unknown_1);
+
+        assert_eq!(decoded.block_3.len(), original.block_3.len());
+        assert_eq!(decoded.block_3[0].string, "test_string_1");
+        assert_eq!(decoded.block_3[1].string, "test_string_2");
+        assert_eq!(decoded.block_3[2].string, "test_string_1");
+    }
 }

@@ -4,9 +4,10 @@ use crate::types::{
     DescriptionSubGroup, FileListInfo, PropertiesPtxInfo, ResourcesDescription, RsbHeader,
     RsbPtxInfo, RsgInfo,
 };
-use byteorder::{ReadBytesExt, LE};
+use byteorder::{LE, ReadBytesExt};
 pub mod error;
 pub mod utils;
+pub mod writer;
 use crate::error::{Result, RsbError};
 use crate::utils::read_file_list;
 use std::collections::HashMap;
@@ -64,7 +65,7 @@ impl<R: Read + Seek> Rsb<R> {
         header.part3_begin_offset = reader.read_u32::<LE>()?;
 
         if version == 4 || version == 5 {
-            header.file_offset = reader.read_u32::<LE>()?;
+            // header.file_offset = reader.read_u32::<LE>()?;
         }
 
         Ok(Rsb { reader, header })
@@ -396,7 +397,7 @@ impl<R: Read + Seek> Rsb<R> {
                             let props_num = self.reader.read_u32::<LE>()?;
 
                             let mut ptx_info = None;
-                            if ptx_end * ptx_begin != 0 {
+                            if ptx_end != 0 && ptx_begin != 0 {
                                 let imagetype = self.reader.read_u16::<LE>()?.to_string();
                                 let aflags = self.reader.read_u16::<LE>()?.to_string();
                                 let x = self.reader.read_u16::<LE>()?.to_string();

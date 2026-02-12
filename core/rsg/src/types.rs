@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::utils::FileListPayload;
-use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
@@ -94,7 +94,7 @@ impl FileListPayload for RsgPayload {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UnpackedFile {
     pub path: String,
     #[serde(skip)]

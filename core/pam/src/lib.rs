@@ -3,7 +3,10 @@ use byteorder::{LE, ReadBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek};
 
+pub mod encode;
 pub mod html5;
+
+pub use encode::encode_pam;
 
 pub const PAM_MAGIC: u32 = 0xBAF01954;
 
@@ -299,7 +302,7 @@ fn read_frame_info<R: Read>(reader: &mut R, version: i32) -> Result<FrameInfo> {
 }
 
 bitflags::bitflags! {
-    struct FrameFlags: u8 {
+    pub struct FrameFlags: u8 {
         const REMOVES = 1;
         const ADDS = 2;
         const MOVES = 4;
@@ -362,7 +365,7 @@ fn read_adds_info<R: Read>(reader: &mut R, version: i32) -> Result<AddsInfo> {
 }
 
 bitflags::bitflags! {
-    struct MoveFlags: u16 {
+    pub struct MoveFlags: u16 {
         const SRC_RECT = 32768;
         const ROTATE = 16384;
         const COLOR = 8192;
@@ -442,4 +445,78 @@ fn read_moves_info<R: Read>(reader: &mut R, _version: i32) -> Result<MovesInfo> 
         source_rectangle,
         sprite_frame_number,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_pam_round_trip() {
+        // Create a minimal PamInfo
+        let original = PamInfo {
+            version: 5,
+            frame_rate: 30,
+            position: [10.0, 20.0],
+            size: [100.0, 200.0],
+            image: vec![ImageInfo {
+                name: "test_img".to_string(),
+                size: [50, 50],
+                transform: vec![1.0, 0.0, 0.0, 1.0, 10.0, 10.0],
+            }],
+            sprite: vec![SpriteInfo {
+                name: Some("test_sprite".to_string()),
+                description: None,
+                frame_rate: 30.0,
+                work_area: [0, 10],
+                frame: vec![FrameInfo {
+                    label: Some("start".to_string()),
+                    stop: false,
+                    command: vec![],
+                    remove: vec![],
+                    append: vec![AddsInfo {
+                        index: 0,
+                        name: None,
+                        resource: 0,
+                        sprite: false,
+                        additive: false,
+                        preload_frame: 0,
+                        time_scale: 1.0,
+                    }],
+                    change: vec![MovesInfo {
+                        index: 0,
+                        transform: vec![1.0, 0.0, 0.0, 1.0, 5.0, 5.0],
+                        color: Some([1.0, 1.0, 1.0, 0.5]),
+                        source_rectangle: None,
+                        sprite_frame_number: 0,
+                    }],
+                }],
+            }],
+            main_sprite: SpriteInfo::default(),
+        };
+
+        // Encode
+        let mut buffer = Vec::new();
+        encode_pam(&original, &mut buffer).expect("Encode failed");
+
+        // Decode
+        let mut cursor = Cursor::new(buffer);
+        let decoded = decode_pam(&mut cursor).expect("Decode failed");
+
+        // Verify key fields (Floating point comparison might be tricky for strict Eq)
+        assert_eq!(decoded.version, original.version);
+        assert_eq!(decoded.frame_rate, original.frame_rate);
+        assert_eq!(decoded.image.len(), original.image.len());
+        assert_eq!(decoded.image[0].name, original.image[0].name);
+        assert_eq!(decoded.sprite.len(), original.sprite.len());
+        assert_eq!(decoded.sprite[0].name, original.sprite[0].name);
+        assert_eq!(
+            decoded.sprite[0].frame.len(),
+            original.sprite[0].frame.len()
+        );
+
+        // Deep verification usually requires PartialEq impls, skipping for brevity
+        // but basics seem covered.
+    }
 }

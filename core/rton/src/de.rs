@@ -1,6 +1,6 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use integer_encoding::VarIntReader;
-use serde::de::{self, Deserialize, DeserializeOwned};
+use serde::de::{self, DeserializeOwned};
 use simple_rijndael::impls::RijndaelCbc;
 use simple_rijndael::paddings::ZeroPadding;
 use std::io::{Cursor, Read, Seek, SeekFrom};
@@ -135,29 +135,15 @@ fn validate_header_and_decrypt<R: Read>(
     Ok(None)
 }
 
-/// Deserializes a RTON byte slice into a type.
-pub fn from_bytes<'a, T: Deserialize<'a>>(bytes: &'a [u8]) -> Result<T> {
-    let mut cursor = Cursor::new(bytes);
-    // Passing None for key means if it encounters encrypted header, it returns MissingKey error.
-    let check = validate_header_and_decrypt(&mut cursor, None)?;
-    if check.is_some() {
-        // Should be unreachable because validate_header_and_decrypt returns Err if key is None and header is encrypted.
-        return Err(Error::Message("Unexpected decryption in from_bytes".into()));
-    }
-
-    let mut deserializer = RtonDeserializer::new(cursor);
-    let value = T::deserialize(&mut deserializer)?;
-    Ok(value)
-}
-
 /// Deserializes a RTON byte slice into a type, with optional decryption key.
 /// Note: Requires T to be DeserializeOwned because decryption produces new owned data.
-pub fn from_bytes_with_key<T: DeserializeOwned>(bytes: &[u8], key_seed: Option<&str>) -> Result<T> {
+pub fn from_bytes<T: DeserializeOwned>(bytes: &[u8], key_seed: Option<&str>) -> Result<T> {
     let mut cursor = Cursor::new(bytes);
     let check = validate_header_and_decrypt(&mut cursor, key_seed)?;
 
     if let Some(decrypted) = check {
-        return from_reader(Cursor::new(decrypted));
+        // Recursively call from_reader with the decrypted data (no key needed for inner)
+        return from_reader(Cursor::new(decrypted), None);
     }
 
     let mut deserializer = RtonDeserializer::new(cursor);
@@ -165,19 +151,15 @@ pub fn from_bytes_with_key<T: DeserializeOwned>(bytes: &[u8], key_seed: Option<&
     Ok(value)
 }
 
-/// Deserializes an IO stream into a type.
-pub fn from_reader<R: Read + Seek, T: DeserializeOwned>(reader: R) -> Result<T> {
-    from_reader_with_key(reader, None)
-}
-
 /// Deserializes an IO stream into a type, with optional decryption key.
-pub fn from_reader_with_key<R: Read + Seek, T: DeserializeOwned>(
+pub fn from_reader<R: Read + Seek, T: DeserializeOwned>(
     mut reader: R,
     key_seed: Option<&str>,
 ) -> Result<T> {
     let check = validate_header_and_decrypt(&mut reader, key_seed)?;
     if let Some(decrypted) = check {
-        return from_reader(Cursor::new(decrypted));
+        // Recursively call from_reader (no key needed for inner)
+        return from_reader(Cursor::new(decrypted), None);
     }
 
     let mut deserializer = RtonDeserializer::new(reader);
