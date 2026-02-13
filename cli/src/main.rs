@@ -76,6 +76,15 @@ enum PatchCommands {
         /// Output Target file
         output: PathBuf,
     },
+    /// Extract VCDiff patches from an RSBPatch file (PBSR)
+    Extract {
+        /// Input RSBPatch file
+        #[arg(short, long)]
+        input: PathBuf,
+        /// Output directory for extracted .vcdiff files
+        #[arg(short, long)]
+        output: PathBuf,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1493,6 +1502,76 @@ fn handle_patch(cmd: &PatchCommands) -> anyhow::Result<()> {
             patch::decode(&mut src_file, &mut patch_file, &mut out_file)
                 .map_err(|e| anyhow::anyhow!("Patch application failed: {:?}", e))?;
             println!("Patch applied successfully.");
+        }
+        PatchCommands::Extract { input, output } => {
+            let mut file = fs::File::open(input).context("Failed to open RSBPatch file")?;
+            let mut reader = patch::rsb_patch::RsbPatchReader::new(&mut file);
+
+            let header = reader
+                .read_header()
+                .map_err(|e| anyhow::anyhow!("Failed to read RSBPatch header: {:?}", e))?;
+
+            println!("RSBPatch Header:");
+            println!("  RSB Head Size: {}", header.rsb_head_size);
+            println!("  RSG Number: {}", header.rsg_number);
+            println!("  Need Patch: {}", header.rsb_need_patch);
+
+            if !output.exists() {
+                fs::create_dir_all(output).context("Failed to create output directory")?;
+            }
+
+            if let Some(header_diff) = reader
+                .extract_header_diff(&header)
+                .map_err(|e| anyhow::anyhow!("Failed to extract header diff: {:?}", e))?
+            {
+                let out_path = output.join("header.vcdiff");
+                fs::write(&out_path, header_diff).context("Failed to write header.vcdiff")?;
+                println!("Extracted header diff to {:?}", out_path);
+            }
+
+            let mut count = 0;
+            while let Some((info, _offset)) = reader
+                .next_packet_info()
+                .map_err(|e| anyhow::anyhow!("Failed to read packet info: {:?}", e))?
+            {
+                if info.packet_patch_size > 0 {
+                    let diff_data =
+                        reader
+                            .extract_packet_diff(info.packet_patch_size)
+                            .map_err(|e| {
+                                anyhow::anyhow!(
+                                    "Failed to extract packet diff for {}: {:?}",
+                                    info.packet_name,
+                                    e
+                                )
+                            })?;
+
+                    let safe_name = info
+                        .packet_name
+                        .replace(|c: char| !c.is_alphanumeric() && c != '.' && c != '_', "_");
+                    let out_path = output.join(format!("{}.vcdiff", safe_name));
+                    fs::write(&out_path, diff_data)
+                        .context(format!("Failed to write {}.vcdiff", safe_name))?;
+                    println!(
+                        "Extracted packet diff: {} ({} bytes)",
+                        info.packet_name, info.packet_patch_size
+                    );
+                    count += 1;
+                } else {
+                    // Skip implicit 0 size read?
+                    // My previous logic `extract_packet_diff` reads `size` bytes.
+                    // If size is 0, it reads 0 bytes, effectively doing nothing.
+                    // But we might need to be careful if file offset advances correctly.
+                    // My `next_packet_info` returns tuple `(info, offset)`.
+                    // And `start_pos + 152` returns position at start of data.
+                    // `extract_packet_diff` reads from current position.
+                    // So if size is 0, read 0 bytes, pos remains at start of data (which is start of next header).
+                    // Yes, this is correct for 0 size diffs.
+                    let _ = reader.extract_packet_diff(0)?;
+                }
+            }
+
+            println!("Extracted {} packet diffs to {:?}", count, output);
         }
     }
     Ok(())

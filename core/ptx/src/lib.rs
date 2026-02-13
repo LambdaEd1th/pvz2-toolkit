@@ -136,8 +136,7 @@ impl PtxDecoder {
                 }
                 Ok(DynamicImage::ImageRgba8(img_buf))
             }
-            PtxFormat::Rgba4444 | PtxFormat::Rgba4444Block => {
-                // Block suffix might just imply tiling which we might ignore for now or they are same layout
+            PtxFormat::Rgba4444 => {
                 if data.len() < num_pixels * 2 {
                     return Err(RsbError::DeserializationError(format!(
                         "Insufficient data for RGBA4444: expected {}, got {}",
@@ -148,16 +147,6 @@ impl PtxDecoder {
                 let mut img_buf = ImageBuffer::new(width, height);
                 for (i, pixel) in img_buf.pixels_mut().enumerate() {
                     let offset = i * 2;
-                    // RGBA 4444: RRRR GGGG BBBB AAAA in a 16-bit word?
-                    // Or Byte 0: (G << 4) | R ?
-                    // Usually: 0xF000 (R), 0x0F00 (G), 0x00F0 (B), 0x000F (A) or similar.
-                    // C# TextureCoder would clarify.
-                    // Assuming Little Endian u16.
-                    // If 0xRGBA (4444) -> Memory: BA RG (LO HI)?
-                    // Let's assume nibbles are [G R] [A B] in bytes? No that's weird.
-                    // Standard OpenGL RGBA4: R G B A order in nibbles?
-                    // Let's implement generic 4444 and tweak if colors are wrong.
-                    // Try: Val = (r << 12) | (g << 8) | (b << 4) | a
                     let v = u16::from_le_bytes([data[offset], data[offset + 1]]);
                     let a4 = v & 0xF;
                     let b4 = (v >> 4) & 0xF;
@@ -173,7 +162,48 @@ impl PtxDecoder {
                 }
                 Ok(DynamicImage::ImageRgba8(img_buf))
             }
-            PtxFormat::Rgba5551 | PtxFormat::Rgba5551Block => {
+            PtxFormat::Rgba4444Block => {
+                if data.len() < num_pixels * 2 {
+                    return Err(RsbError::DeserializationError(format!(
+                        "Insufficient data for Rgba4444Block: expected {}, got {}",
+                        num_pixels * 2,
+                        data.len()
+                    )));
+                }
+                let mut img_buf = ImageBuffer::new(width, height);
+                let mut offset = 0;
+                for y in (0..height).step_by(32) {
+                    for x in (0..width).step_by(32) {
+                        for j in 0..32 {
+                            for k in 0..32 {
+                                let py = y + j;
+                                let px = x + k;
+                                if py < height && px < width {
+                                    let v = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                                    let a4 = v & 0xF;
+                                    let b4 = (v >> 4) & 0xF;
+                                    let g4 = (v >> 8) & 0xF;
+                                    let r4 = (v >> 12) & 0xF;
+
+                                    let r = (r4 << 4) | r4;
+                                    let g = (g4 << 4) | g4;
+                                    let b = (b4 << 4) | b4;
+                                    let a = (a4 << 4) | a4;
+
+                                    img_buf.put_pixel(
+                                        px,
+                                        py,
+                                        Rgba([r as u8, g as u8, b as u8, a as u8]),
+                                    );
+                                }
+                                offset += 2;
+                            }
+                        }
+                    }
+                }
+                Ok(DynamicImage::ImageRgba8(img_buf))
+            }
+            PtxFormat::Rgba5551 => {
                 if data.len() < num_pixels * 2 {
                     return Err(RsbError::DeserializationError(format!(
                         "Insufficient data for RGBA5551: expected {}, got {}",
@@ -197,6 +227,92 @@ impl PtxDecoder {
                     let a = if a1 == 1 { 255 } else { 0 };
 
                     *pixel = Rgba([r as u8, g as u8, b as u8, a]);
+                }
+                Ok(DynamicImage::ImageRgba8(img_buf))
+            }
+            PtxFormat::Rgba5551Block => {
+                if data.len() < num_pixels * 2 {
+                    return Err(RsbError::DeserializationError(format!(
+                        "Insufficient data for Rgba5551Block: expected {}, got {}",
+                        num_pixels * 2,
+                        data.len()
+                    )));
+                }
+                let mut img_buf = ImageBuffer::new(width, height);
+                let mut offset = 0;
+                for y in (0..height).step_by(32) {
+                    for x in (0..width).step_by(32) {
+                        for j in 0..32 {
+                            for k in 0..32 {
+                                let py = y + j;
+                                let px = x + k;
+                                if py < height && px < width {
+                                    let v = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                                    // RRRRR GGGGG BBBBB A
+                                    let r5 = (v >> 11) & 0x1F;
+                                    let g5 = (v >> 6) & 0x1F;
+                                    let b5 = (v >> 1) & 0x1F;
+                                    let a1 = v & 1;
+
+                                    let r = (r5 << 3) | (r5 >> 2);
+                                    let g = (g5 << 3) | (g5 >> 2);
+                                    let b = (b5 << 3) | (b5 >> 2);
+                                    let a = if a1 == 1 { 255 } else { 0 };
+
+                                    img_buf.put_pixel(px, py, Rgba([r as u8, g as u8, b as u8, a]));
+                                }
+                                offset += 2;
+                            }
+                        }
+                    }
+                }
+                Ok(DynamicImage::ImageRgba8(img_buf))
+            }
+            PtxFormat::Rgb565Block => {
+                if data.len() < num_pixels * 2 {
+                    return Err(RsbError::DeserializationError(format!(
+                        "Insufficient data for Rgb565Block: expected {}, got {}",
+                        num_pixels * 2,
+                        data.len()
+                    )));
+                }
+
+                let mut img_buf = ImageBuffer::new(width, height);
+                // Tiled decoding: 32x32 blocks
+                // Logic based on other block formats (assumed) or standard PowerVR tiling?
+                // Sen's implementation or PtxEncoder::encode uses 32x32 blocks.
+                // Iterate over blocks in the input data order.
+
+                let mut offset = 0;
+                for y in (0..height).step_by(32) {
+                    for x in (0..width).step_by(32) {
+                        for j in 0..32 {
+                            for k in 0..32 {
+                                let py = y + j;
+                                let px = x + k;
+
+                                if py < height && px < width {
+                                    let v = u16::from_le_bytes([data[offset], data[offset + 1]]);
+                                    // RGB 565: RRRRR GGGGGG BBBBB
+                                    let r5 = (v >> 11) & 0x1F;
+                                    let g6 = (v >> 5) & 0x3F;
+                                    let b5 = v & 0x1F;
+
+                                    // Expand to 8-bit
+                                    let r = (r5 << 3) | (r5 >> 2);
+                                    let g = (g6 << 2) | (g6 >> 4);
+                                    let b = (b5 << 3) | (b5 >> 2);
+
+                                    img_buf.put_pixel(
+                                        px,
+                                        py,
+                                        Rgba([r as u8, g as u8, b as u8, 255]),
+                                    );
+                                }
+                                offset += 2;
+                            }
+                        }
+                    }
                 }
                 Ok(DynamicImage::ImageRgba8(img_buf))
             }

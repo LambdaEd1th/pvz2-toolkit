@@ -7,8 +7,11 @@ pub enum PatchError {
     Io(#[from] io::Error),
     #[error("VCDiff error: {0}")]
     VCDiff(String),
+    #[error("RSB Patch error: {0}")]
+    RsbPatch(#[from] rsb_patch::RsbPatchError),
 }
 
+pub mod rsb_patch;
 pub type Result<T> = std::result::Result<T, PatchError>;
 
 /// Encodes a patch (diff) between source (dictionary) and target.
