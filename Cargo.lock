@@ -809,6 +809,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
+
+[[package]]
 name = "md5"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1120,6 +1130,7 @@ dependencies = [
  "clap",
  "image",
  "lawnstrings",
+ "md-5",
  "newton",
  "pam",
  "patch",
@@ -1132,6 +1143,7 @@ dependencies = [
  "serde",
  "serde-xml-rs",
  "serde_json",
+ "smf",
  "wem",
 ]
 
@@ -1469,6 +1481,15 @@ name = "smallvec"
 version = "1.15.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
+
+[[package]]
+name = "smf"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "flate2",
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "stable_deref_trait"

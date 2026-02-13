@@ -50,6 +50,7 @@ impl PtxDecoder {
         height: u32,
         format_code: i32,
         _alpha_size: Option<i32>,
+        alpha_format: Option<i32>,
         is_powervr: bool,
     ) -> Result<DynamicImage> {
         let mut format = PtxFormat::from(format_code);
@@ -73,7 +74,12 @@ impl PtxDecoder {
         } else if format_code == 147 {
             // ID 147: ETC1 (Opaque) OR ETC1 A8
             let expected_opaque_size = (width * height) as usize / 2;
+            // Check for ETC1 + Uncompressed Alpha (1 byte/pixel)
             if data.len() >= expected_opaque_size + (width * height) as usize {
+                format = PtxFormat::Etc1A8;
+            } else if data.len() >= expected_opaque_size * 2 {
+                // Check for ETC1 + Compressed Alpha (ETC1 block)
+                // Use Etc1A8 internally but handle splitting in decoder
                 format = PtxFormat::Etc1A8;
             }
         }
@@ -420,36 +426,151 @@ impl PtxDecoder {
 
                 let mut img_buf = ImageBuffer::new(width, height);
 
-                for y in 0..blocks_y {
-                    for x in 0..blocks_x {
-                        let block_idx = (y * blocks_x + x) as usize;
-                        let offset = block_idx * 8;
-                        // ETC1 is Big Endian
-                        let temp = u64::from_be_bytes(data[offset..offset + 8].try_into().unwrap());
+                // Helper to decode an ETC1 block to an image buffer at (x*4, y*4)
+                let decode_into = |data_slice: &[u8],
+                                   target: &mut ImageBuffer<Rgba<u8>, Vec<u8>>,
+                                   write_alpha_to_red: bool| {
+                    for y in 0..blocks_y {
+                        for x in 0..blocks_x {
+                            let block_idx = (y * blocks_x + x) as usize;
+                            let offset = block_idx * 8;
+                            // ETC1 is Big Endian
+                            let temp = u64::from_be_bytes(
+                                data_slice[offset..offset + 8].try_into().unwrap(),
+                            );
 
-                        let mut decoded_block = [crate::color::Rgba32::default(); 16];
-                        crate::codec::etc1::decode_etc1(temp, &mut decoded_block);
+                            let mut decoded_block = [crate::color::Rgba32::default(); 16];
+                            crate::codec::etc1::decode_etc1(temp, &mut decoded_block);
 
-                        for py in 0..4 {
-                            for px in 0..4 {
-                                let gx = x * 4 + px;
-                                let gy = y * 4 + py;
+                            for py in 0..4 {
+                                for px in 0..4 {
+                                    let gx = x * 4 + px;
+                                    let gy = y * 4 + py;
 
-                                if gx < width && gy < height {
-                                    let pixel = decoded_block[px as usize * 4 + py as usize];
-                                    img_buf.put_pixel(gx, gy, pixel.to_pixel());
+                                    if gx < width && gy < height {
+                                        let pixel = decoded_block[px as usize * 4 + py as usize];
+                                        if write_alpha_to_red {
+                                            // For alpha texture, we just want the grayscale value.
+                                            // ETC1 R=G=B usually for grayscale. Take R.
+                                            let p = target.get_pixel_mut(gx, gy);
+                                            p[3] = pixel.r;
+                                        } else {
+                                            target.put_pixel(gx, gy, pixel.to_pixel());
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
-                }
+                };
+
+                // Decode RGB part
+                decode_into(&data[0..expected_size_opaque], &mut img_buf, false);
 
                 if format == PtxFormat::Etc1A8 {
-                    let expected_size_a8 = expected_size_opaque + (width * height) as usize;
-                    if data.len() >= expected_size_a8 {
-                        let alpha_data = &data[expected_size_opaque..];
-                        for (i, pixel) in img_buf.pixels_mut().enumerate() {
-                            pixel[3] = alpha_data[i];
+                    let size_uncompressed = expected_size_opaque + (width * height) as usize;
+                    let size_compressed_no_header = expected_size_opaque * 2;
+                    let size_compressed_with_header = size_compressed_no_header + 17;
+
+                    // Determine alpha mode and header presence
+                    let (use_compressed_alpha, has_header) = if let Some(af) = alpha_format {
+                        if af == 100 {
+                            if data.len() >= size_compressed_with_header {
+                                (true, true)
+                            } else {
+                                (true, false)
+                            }
+                        } else {
+                            (false, false)
+                        }
+                    } else {
+                        // Heuristic based on size
+                        // For small textures (e.g. 4x4), CompressedWithHeader (33) > Uncompressed (24)
+                        // For large textures (e.g. 8x8), Uncompressed (96) > CompressedWithHeader (81)
+                        // We should check the larger requirement first to avoid false positives from the smaller requirement matching the larger data.
+
+                        if size_compressed_with_header > size_uncompressed {
+                            // Small texture case: Check Compressed first
+                            if data.len() >= size_compressed_with_header {
+                                (true, true)
+                            } else if data.len() >= size_uncompressed {
+                                (false, false)
+                            } else if data.len() >= size_compressed_no_header {
+                                (true, false)
+                            } else {
+                                (false, false)
+                            }
+                        } else {
+                            // Large texture case: Check Uncompressed first
+                            if data.len() >= size_uncompressed {
+                                (false, false)
+                            } else if data.len() >= size_compressed_with_header {
+                                (true, true)
+                            } else if data.len() >= size_compressed_no_header {
+                                (true, false)
+                            } else {
+                                (false, false)
+                            }
+                        }
+                    };
+
+                    if use_compressed_alpha {
+                        if has_header {
+                            // Check if this is Palette Alpha (17 byte header + 4bpp data)
+                            // Size check: header (17) + (width * height) / 2
+                            // Note: 4bpp alpha size is exactly same as ETC1 opaque size (0.5 bytes per pixel)
+                            // So total alpha chunk size = 17 + expected_size_opaque
+
+                            let alpha_chunk_size = data.len() - expected_size_opaque;
+                            let expected_palette_size = 17 + expected_size_opaque;
+
+                            if alpha_chunk_size == expected_palette_size {
+                                // PALETTE ALPHA MODE
+                                let offset = expected_size_opaque;
+                                // Skip header (handled inside decode_palette_alpha or we pass slice)
+                                // decode_palette_alpha expects the header to be present in the slice
+                                let alpha_data = &data[offset..];
+                                if let Ok(alphas) = crate::codec::etc1::decode_palette_alpha(
+                                    alpha_data,
+                                    (width * height) as usize,
+                                ) {
+                                    for (i, pixel) in img_buf.pixels_mut().enumerate() {
+                                        if i < alphas.len() {
+                                            pixel[3] = alphas[i];
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Default back to ETC1 Compressed Alpha with Header (weird case loops 17 bytes offset)
+                                // This was the previous "fix" or attempt.
+                                // But if size doesn't match Palette, maybe it is ETC1?
+                                let offset = expected_size_opaque + 17;
+                                if offset + expected_size_opaque <= data.len() {
+                                    decode_into(
+                                        &data[offset..offset + expected_size_opaque],
+                                        &mut img_buf,
+                                        true,
+                                    );
+                                }
+                            }
+                        } else {
+                            // Regular ETC1 Compressed Alpha (no header)
+                            let offset = expected_size_opaque;
+                            if offset + expected_size_opaque <= data.len() {
+                                decode_into(
+                                    &data[offset..offset + expected_size_opaque],
+                                    &mut img_buf,
+                                    true,
+                                );
+                            }
+                        }
+                    } else {
+                        // Uncompressed Alpha (1 byte per pixel)
+                        if data.len() >= size_uncompressed {
+                            let alpha_data = &data[expected_size_opaque..];
+                            for (i, pixel) in img_buf.pixels_mut().enumerate() {
+                                pixel[3] = alpha_data[i];
+                            }
                         }
                     }
                 } else if format == PtxFormat::Etc1Palette {
@@ -703,8 +824,8 @@ mod tests {
 
         // Case 1: PowerVR (iOS) decoding of BGRA data
         // Flag = true. Expects BGRA input.
-        let img_ios =
-            PtxDecoder::decode(&bgra_data, 1, 1, 0, None, true).expect("PowerVR decoding failed");
+        let img_ios = PtxDecoder::decode(&bgra_data, 1, 1, 0, None, None, true)
+            .expect("PowerVR decoding failed");
         let pixel_ios = *img_ios.to_rgba8().get_pixel(0, 0);
         assert_eq!(
             pixel_ios,
@@ -714,8 +835,8 @@ mod tests {
 
         // Case 2: Default (Android) decoding of RGBA data
         // Flag = false. Expects RGBA input.
-        let img_android =
-            PtxDecoder::decode(&rgba_data, 1, 1, 0, None, false).expect("Default decoding failed");
+        let img_android = PtxDecoder::decode(&rgba_data, 1, 1, 0, None, None, false)
+            .expect("Default decoding failed");
         let pixel_android = *img_android.to_rgba8().get_pixel(0, 0);
         assert_eq!(
             pixel_android,
@@ -773,6 +894,42 @@ mod tests {
     }
 
     #[test]
+    fn test_etc1_compressed_alpha() {
+        let width = 4;
+        let height = 4;
+        let opaque_size = (width * height) / 2; // 8 bytes for 4x4
+        let data_opaque = vec![0u8; opaque_size as usize]; // Dummy ETC1 block
+
+        // Case 1: Header present (17 bytes)
+        // 17 bytes header + 8 bytes (4x4 alpha block)
+        let mut data_alpha = vec![0u8; 17];
+        data_alpha.extend(vec![0u8; opaque_size as usize]);
+        let mut data = data_opaque.clone();
+        data.extend(data_alpha);
+
+        let res = PtxDecoder::decode(&data, width, height, 147, None, Some(100), false);
+        assert!(
+            res.is_ok(),
+            "ETC1 with compressed alpha and header should decode"
+        );
+    }
+
+    #[test]
+    fn test_etc1_alpha_legacy() {
+        let width = 4;
+        let height = 4;
+        let opaque_size = (width * height) / 2;
+        let data_opaque = vec![0u8; opaque_size as usize];
+        let mut data_no_header = data_opaque.clone();
+        data_no_header.extend(vec![0u8; opaque_size as usize]);
+        let res = PtxDecoder::decode(&data_no_header, width, height, 147, None, Some(100), false);
+        assert!(
+            res.is_ok(),
+            "ETC1 with compressed alpha (no header) should also decode if size matches exactly 2x"
+        );
+    }
+
+    #[test]
     fn test_ambiguous_format_resolution() {
         // Test ID 147 (Etc1 vs Etc1A8)
         let width = 8;
@@ -784,7 +941,7 @@ mod tests {
         let data = vec![0u8; opaque_size as usize];
         // We can't check internal format easily, but we can check if it errors or decodes.
         // For Etc1, it should decode 4x4 opaque black (all zeros data -> somewhat valid ETC1 block).
-        let res = PtxDecoder::decode(&data, width, height, 147, None, false);
+        let res = PtxDecoder::decode(&data, width, height, 147, None, None, false);
         assert!(
             res.is_ok(),
             "ID 147 with opaque-only size should decode as ETC1"
@@ -797,7 +954,7 @@ mod tests {
         for i in opaque_size as usize..data_a8.len() {
             data_a8[i] = 255;
         }
-        let res = PtxDecoder::decode(&data_a8, width, height, 147, None, false);
+        let res = PtxDecoder::decode(&data_a8, width, height, 147, None, None, false);
         assert!(
             res.is_ok(),
             "ID 147 with alpha size should decode as Etc1A8"
@@ -815,7 +972,7 @@ mod tests {
 
         // Case 3: PVRTC size -> Pvrtc4Bpp
         let pvrtc_data = vec![0u8; 32];
-        let res = PtxDecoder::decode(&pvrtc_data, width, height, 30, None, false);
+        let res = PtxDecoder::decode(&pvrtc_data, width, height, 30, None, None, false);
         assert!(res.is_ok(), "ID 30 with PVRTC size should decode as PVRTC");
 
         // Case 4: Larger size -> Etc1Palette
@@ -823,10 +980,29 @@ mod tests {
         let mut palette_data = vec![0u8; 81];
         // Set palette header to 0x10 (16 colors)
         palette_data[32] = 0x10;
-        let res = PtxDecoder::decode(&palette_data, width, height, 30, None, false);
+        let res = PtxDecoder::decode(&palette_data, width, height, 30, None, None, false);
         assert!(
             res.is_ok(),
             "ID 30 with larger size should decode as Etc1Palette"
+        );
+        // Case 5: ETC1 + Compressed Alpha (Double Size + Header)
+        // The original test assumed exact 2x size. Let's update it to use the referenced 1200_00.PTX structure
+        let width = 4;
+        let height = 4;
+        let opaque_size = 8;
+        let data_compressed_alpha = vec![0u8; (opaque_size * 2) + 17];
+        let res = PtxDecoder::decode(
+            &data_compressed_alpha,
+            width,
+            height,
+            147,
+            None,
+            Some(100), // Explicitly passing alpha_format
+            false,
+        );
+        assert!(
+            res.is_ok(),
+            "ID 147 with 2x size + 17 bytes should decode as ETC1 + Compressed Alpha with Header"
         );
     }
 }

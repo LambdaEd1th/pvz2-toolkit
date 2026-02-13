@@ -54,6 +54,9 @@ enum Commands {
     /// VCDiff Patch Operations (RSBPatch)
     #[command(subcommand)]
     Patch(PatchCommands),
+    /// SMF Operations (PopCap Zlib)
+    #[command(subcommand)]
+    Smf(SmfCommands),
 }
 
 #[derive(Subcommand)]
@@ -84,6 +87,34 @@ enum PatchCommands {
         /// Output directory for extracted .vcdiff files
         #[arg(short, long)]
         output: PathBuf,
+    },
+}
+
+#[derive(Subcommand)]
+enum SmfCommands {
+    /// Unpack (Decompress) a .smf file
+    Unpack {
+        /// Input file
+        #[arg(short, long)]
+        input: PathBuf,
+        /// Output file (optional, defaults to input without .smf extension or .decoded)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Use 64-bit variant (16-byte header)
+        #[arg(long)]
+        use_64bit: bool,
+    },
+    /// Pack (Compress) a file into .smf format
+    Pack {
+        /// Input file
+        #[arg(short, long)]
+        input: PathBuf,
+        /// Output file (optional, defaults to input + .smf)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Use 64-bit variant (16-byte header)
+        #[arg(long)]
+        use_64bit: bool,
     },
 }
 
@@ -209,6 +240,9 @@ enum PtxCommands {
         /// Force PowerVR/iOS format (BGRA for Format 0)
         #[arg(long)]
         powervr: bool,
+        /// Use Palette Alpha (4bpp with 16-color header) for ETC1A8 (Format 147)
+        #[arg(long)]
+        palette: bool,
     },
 }
 
@@ -361,7 +395,8 @@ fn main() -> anyhow::Result<()> {
                 input,
                 output,
                 powervr,
-            } => ptx_encode(input, output, *powervr)?,
+                palette,
+            } => ptx_encode(input, output, *powervr, *palette)?,
         },
         Commands::Rton(cmd) => match cmd {
             RtonCommands::Decode {
@@ -392,7 +427,105 @@ fn main() -> anyhow::Result<()> {
             PopfxCommands::Encode { input, output } => popfx_encode(input, output)?,
         },
         Commands::Patch(cmd) => handle_patch(cmd)?,
+        Commands::Smf(cmd) => match cmd {
+            SmfCommands::Unpack {
+                input,
+                output,
+                use_64bit,
+            } => smf_unpack(input, output, *use_64bit)?,
+            SmfCommands::Pack {
+                input,
+                output,
+                use_64bit,
+            } => smf_pack(input, output, *use_64bit)?,
+        },
     }
+
+    Ok(())
+}
+
+fn smf_unpack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> anyhow::Result<()> {
+    let mut file = fs::File::open(input).context("Failed to open input file")?;
+    let decoded = smf::decode(&mut file, use_64bit).context("Failed to decode SMF")?;
+
+    let out_path = match output {
+        Some(p) => p.clone(),
+        None => {
+            if input.extension().map_or(false, |e| e == "smf") {
+                input.with_extension("")
+            } else {
+                input.with_extension("decoded")
+            }
+        }
+    };
+
+    fs::write(&out_path, decoded).context("Failed to write output file")?;
+    println!("Unpacked SMF to {:?}", out_path);
+    Ok(())
+}
+
+fn smf_pack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> anyhow::Result<()> {
+    let data = fs::read(input).context("Failed to read input file")?;
+
+    let out_path = match output {
+        Some(p) => p.clone(),
+        None => {
+            // Append .smf. If existing extension, e.g. .rsb, becomes .rsb.smf
+            let mut p = input.to_path_buf();
+            if let Some(ext) = p.extension() {
+                let mut ext = ext.to_os_string();
+                ext.push(".smf");
+                p.set_extension(ext);
+            } else {
+                p.set_extension("smf");
+            }
+            p
+        }
+    };
+
+    let mut buffer = Vec::new();
+    // Encode to buffer first to calculate MD5
+    smf::encode(&mut buffer, &data, use_64bit).context("Failed to encode SMF")?;
+
+    fs::write(&out_path, &buffer).context("Failed to write output file")?;
+    println!("Packed SMF to {:?}", out_path);
+
+    // Calculate MD5 of the generated SMF file
+    use md5::{Digest, Md5};
+    let mut hasher = Md5::new();
+    hasher.update(&buffer);
+    let result = hasher.finalize();
+    let md5_hex = format!("{:X}", result); // Uppercase Hex
+
+    // Generate .tag.smf filename
+    // If output is zombie1.rsb.smf, tag is zombie1.rsb.tag.smf
+    // simple string manipulation or with_extension
+    let tag_path = if let Some(file_name) = out_path.file_name() {
+        let mut name = file_name.to_string_lossy().into_owned();
+        if name.ends_with(".smf") {
+            // Replace .smf with .tag.smf
+            name.truncate(name.len() - 4);
+            name.push_str(".tag.smf");
+            out_path.with_file_name(name)
+        } else {
+            // Just append
+            let mut p = out_path.clone();
+            if let Some(ext) = p.extension() {
+                let mut ext = ext.to_os_string();
+                ext.push(".tag.smf");
+                p.set_extension(ext);
+            } else {
+                p.set_extension("tag.smf");
+            }
+            p
+        }
+    } else {
+        out_path.with_extension("tag.smf")
+    };
+
+    let tag_content = format!("{}\r\n", md5_hex);
+    fs::write(&tag_path, tag_content).context("Failed to write .tag.smf file")?;
+    println!("Generated Tag to {:?}", tag_path);
 
     Ok(())
 }
@@ -1668,7 +1801,15 @@ fn ptx_decode(input: &Path, output: &Option<PathBuf>, is_powervr: bool) -> anyho
         let format_code = info.format;
 
         if let Ok(data) = fs::read(&full_input_path) {
-            match ptx::PtxDecoder::decode(&data, width, height, format_code, None, is_powervr) {
+            match ptx::PtxDecoder::decode(
+                &data,
+                width,
+                height,
+                format_code,
+                None,
+                info.alpha_format,
+                is_powervr,
+            ) {
                 Ok(img) => {
                     if let Err(e) = img.save(&full_output_path) {
                         println!("Failed to save {:?}: {:?}", full_output_path, e);
@@ -1685,7 +1826,12 @@ fn ptx_decode(input: &Path, output: &Option<PathBuf>, is_powervr: bool) -> anyho
     Ok(())
 }
 
-fn ptx_encode(input: &Path, output: &Option<PathBuf>, is_powervr: bool) -> anyhow::Result<()> {
+fn ptx_encode(
+    input: &Path,
+    output: &Option<PathBuf>,
+    is_powervr: bool,
+    use_palette: bool,
+) -> anyhow::Result<()> {
     // Input should be rsb_manifest.json
     let input_dir = input.parent().unwrap_or(Path::new("."));
     let out_dir = match output {
@@ -1736,7 +1882,12 @@ fn ptx_encode(input: &Path, output: &Option<PathBuf>, is_powervr: bool) -> anyho
         }
 
         if let Ok(img) = image::open(&png_path) {
-            let format = ptx::PtxFormat::from(info.format);
+            let mut format = ptx::PtxFormat::from(info.format);
+
+            // Apply Palette Override
+            if use_palette && format == ptx::PtxFormat::Etc1A8 {
+                format = ptx::PtxFormat::Etc1Palette;
+            }
 
             // Handle PowerVR/iOS BGRA swap for Format 0 (RGBA8888)
             let mut img_to_encode = img;
@@ -1756,6 +1907,8 @@ fn ptx_encode(input: &Path, output: &Option<PathBuf>, is_powervr: bool) -> anyho
                 Ok(data) => {
                     if let Err(e) = fs::write(&ptx_path, data) {
                         println!("Failed to write {:?}: {:?}", ptx_path, e);
+                    } else {
+                        // println!("Encoded: {:?}", ptx_path);
                     }
                 }
                 Err(e) => {

@@ -12,6 +12,7 @@ members = [
     "core/bnk",
     "core/wem",
     "core/patch",
+    "core/smf",
 ]
 resolver = "2"
 

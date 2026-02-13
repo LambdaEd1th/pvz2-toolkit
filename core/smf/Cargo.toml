@@ -1,0 +1,9 @@
+[package]
+name = "smf"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+flate2 = "1.0"
+byteorder = "1.5"
+thiserror = "1.0"
