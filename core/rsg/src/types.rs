@@ -1,7 +1,6 @@
-use crate::error::Result;
-use crate::utils::FileListPayload;
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
+use shared_utils::file_list::FileListPayload;
 use std::io::{Read, Write};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -42,7 +41,7 @@ pub struct Part1Info {
 }
 
 impl FileListPayload for RsgPayload {
-    fn read(reader: &mut impl Read) -> Result<Self> {
+    fn read(reader: &mut impl Read) -> std::io::Result<Self> {
         let type_flag = reader.read_i32::<LE>()?;
         if type_flag == 1 {
             let offset = reader.read_u32::<LE>()?;
@@ -73,7 +72,7 @@ impl FileListPayload for RsgPayload {
         }
     }
 
-    fn write(&self, writer: &mut impl Write) -> Result<()> {
+    fn write(&self, writer: &mut impl Write) -> std::io::Result<()> {
         match self {
             RsgPayload::Part0(info) => {
                 writer.write_i32::<LE>(0)?;

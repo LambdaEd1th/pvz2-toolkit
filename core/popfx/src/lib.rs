@@ -2,6 +2,7 @@ use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, SeekFrom, Write};
 use thiserror::Error;
+pub mod process;
 
 #[derive(Error, Debug)]
 pub enum PopfxError {

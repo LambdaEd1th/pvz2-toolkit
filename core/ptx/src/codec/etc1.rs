@@ -21,10 +21,10 @@ pub fn gen_etc1(colors: &[Rgba32; 16]) -> u64 {
 
     let mut source_color = [Rgba32::new(0, 0, 0, 0); 16];
 
-    decode_etc1(horizontal, &mut source_color);
+    decode_etc1_block(horizontal, &mut source_color);
     let horizontal_score = get_score(colors, &source_color);
 
-    decode_etc1(vertical, &mut source_color);
+    decode_etc1_block(vertical, &mut source_color);
     let vertical_score = get_score(colors, &source_color);
 
     if horizontal_score < vertical_score {
@@ -34,7 +34,21 @@ pub fn gen_etc1(colors: &[Rgba32; 16]) -> u64 {
     }
 }
 
-pub fn decode_etc1(temp: u64, result: &mut [Rgba32]) {
+// Alias for gen_etc1 to match encoder.rs expectation
+pub fn encode_etc1_block(colors: &[Rgba32; 16]) -> u64 {
+    gen_etc1(colors)
+}
+
+pub fn encode_etc1_alpha_block(colors: &[Rgba32; 16]) -> u64 {
+    // For alpha, we can just use the standard ETC1 encoder on the alpha channel treated as grayscale
+    // But we need to convert alpha to RGB (check if R==G==B==A)
+    // The encoder expects Rgba32, so we can pass it as is if it's grayscale
+    // Or we force it to grayscale?
+    // The caller ensures colors are (A,A,A,255)
+    gen_etc1(colors)
+}
+
+pub fn decode_etc1_block(temp: u64, result: &mut [Rgba32]) {
     let diffbit = ((temp >> 33) & 1) == 1;
     let flipbit = ((temp >> 32) & 1) == 1;
     let r1;
@@ -110,7 +124,147 @@ pub fn decode_etc1(temp: u64, result: &mut [Rgba32]) {
     }
 }
 
-pub fn decode_palette_alpha(data: &[u8], num_pixels: usize) -> Result<Vec<u8>, String> {
+use crate::error::Result;
+use crate::error::RsbError;
+use image::{DynamicImage, GenericImage, GenericImageView, ImageBuffer};
+
+pub fn decode_etc1(data: &[u8], width: u32, height: u32) -> Result<DynamicImage> {
+    let mut img_buf = ImageBuffer::new(width, height);
+    let mut offset = 0;
+
+    // ETC1 blocks are 4x4 pixels, 8 bytes
+    for y in (0..height).step_by(4) {
+        for x in (0..width).step_by(4) {
+            if offset + 8 > data.len() {
+                return Err(RsbError::DeserializationError(
+                    "Insufficient data for ETC1".into(),
+                ));
+            }
+
+            // Read 64-bit block (Big Endian)
+            let block = u64::from_be_bytes([
+                data[offset],
+                data[offset + 1],
+                data[offset + 2],
+                data[offset + 3],
+                data[offset + 4],
+                data[offset + 5],
+                data[offset + 6],
+                data[offset + 7],
+            ]);
+            offset += 8;
+
+            let mut decoded_pixels = [Rgba32::default(); 16];
+            decode_etc1_block(block, &mut decoded_pixels);
+
+            for dy in 0..4 {
+                for dx in 0..4 {
+                    if x + dx < width && y + dy < height {
+                        let p = decoded_pixels[(dx * 4 + dy) as usize];
+                        img_buf.put_pixel(x + dx, y + dy, p.to_pixel());
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(DynamicImage::ImageRgba8(img_buf))
+}
+
+pub fn decode_etc1_a8(
+    data_color: &[u8],
+    data_alpha: &[u8],
+    width: u32,
+    height: u32,
+    compressed_alpha: bool,
+) -> Result<DynamicImage> {
+    let mut img = decode_etc1(data_color, width, height)?;
+
+    if compressed_alpha {
+        // Alpha encoded as ETC1
+        let alpha_img = decode_etc1(data_alpha, width, height)?;
+
+        // Combine: use alpha_img's green channel as alpha
+        for y in 0..height {
+            for x in 0..width {
+                let mut p_color = img.get_pixel(x, y).clone();
+                let p_alpha = alpha_img.get_pixel(x, y);
+                // Assuming ETC1 encoding of grayscale places value in G (and R, B)
+                p_color[3] = p_alpha[1];
+                img.put_pixel(x, y, p_color);
+            }
+        }
+    } else {
+        // Uncompressed Alpha (1 byte per pixel)
+        if data_alpha.len() < (width * height) as usize {
+            return Err(RsbError::DeserializationError(
+                "Insufficient alpha data".into(),
+            ));
+        }
+
+        for y in 0..height {
+            for x in 0..width {
+                let mut p_color = img.get_pixel(x, y).clone();
+                let a = data_alpha[(y * width + x) as usize];
+                p_color[3] = a;
+                img.put_pixel(x, y, p_color);
+            }
+        }
+    }
+
+    Ok(img)
+}
+
+pub fn decode_palette_alpha(data: &[u8], width: u32, height: u32) -> Result<DynamicImage> {
+    // This is essentially PtxDecoder logic but specific for this format.
+    // However, it returns a full image which PtxDecoder expects.
+    // The previous implementation returned specific alpha values.
+    // We need to return an image, BUT Palette Alpha format is standalone?
+    // NO, PtxFormat::Etc1Palette is (ETC1 Data + Alpha Data).
+    // The previous implementation of `decode_palette_alpha` only returned Alpha bytes?
+    // Let's check `lib.rs` (original) or `pvrtc` logic.
+    // Ah, `lib.rs` called `decode_palette_alpha` inside `PtxDecoder::decode`.
+    // It seems `Etc1Palette` format implies:
+    // [ETC1 Data (Opaque)] [Palette Alpha Data]
+    // So we first decode ETC1, then decode alpha and apply it.
+
+    let opaque_size = (width * height) as usize / 2;
+    if data.len() < opaque_size {
+        return Err(RsbError::DeserializationError(
+            "Insufficient data for ETC1 Palette".into(),
+        ));
+    }
+
+    let etc1_data = &data[..opaque_size];
+    let alpha_data = &data[opaque_size..];
+
+    let mut img = decode_etc1(etc1_data, width, height)?;
+
+    // Now decode alpha
+    // The previous helper `decode_palette_alpha` returns Vec<u8> (alpha values).
+    // Let's rename the helper to `decode_palette_alpha_values` and call it.
+
+    let alphas = decode_palette_alpha_values(alpha_data, (width * height) as usize)
+        .map_err(|e| RsbError::DeserializationError(e))?;
+
+    for y in 0..height {
+        for x in 0..width {
+            let idx = (y * width + x) as usize;
+            if idx < alphas.len() {
+                let mut p = img.get_pixel(x, y).clone();
+                p[3] = alphas[idx];
+                img.put_pixel(x, y, p);
+            }
+        }
+    }
+
+    Ok(img)
+}
+
+pub fn decode_palette_alpha_values(
+    data: &[u8],
+    num_pixels: usize,
+) -> std::result::Result<Vec<u8>, String> {
     if data.is_empty() {
         return Err("Empty alpha data".to_string());
     }
@@ -478,28 +632,72 @@ pub fn encode_alpha(data: &[u8], width: u32, height: u32) -> Vec<u8> {
     out
 }
 
-pub fn encode_palette_alpha(data: &[u8], width: u32, height: u32) -> Vec<u8> {
-    // Standard fixed palette (0-15) mapping to (0x00, 0x11, ... 0xFF)
-    // Quantize alpha to 4 bits
-    let num_pixels = (width * height) as usize;
-    let mut out = Vec::with_capacity(1 + 16 + num_pixels / 2 + 1);
+pub fn encode_palette_alpha(image: &DynamicImage) -> Result<Vec<u8>> {
+    // 1. Encode image as ETC1 (RGB)
+    // 2. Extract alpha channel and encode as Palette
 
-    // Header: num = 16
-    out.push(0x10);
-    // Palette: 0..15
-    for i in 0..16 {
-        out.push(i as u8);
+    let width = image.width();
+    let height = image.height();
+    let num_pixels = (width * height) as usize;
+
+    // Pass 1: RGB -> ETC1
+    // We already have code in encoder.rs for this, but to reuse:
+    // We need to call encode_etc1 (but that expects image too)
+    // Or we manually do it here.
+
+    let mut data = Vec::new(); // Final data
+
+    // --- ETC1 Encode ---
+    let blocks_x = (width + 3) / 4;
+    let blocks_y = (height + 3) / 4;
+
+    // RGB Data
+    for by in 0..blocks_y {
+        for bx in 0..blocks_x {
+            let mut block_pixels = [Rgba32::default(); 16];
+            for y in 0..4 {
+                for x in 0..4 {
+                    let px = bx * 4 + x;
+                    let py = by * 4 + y;
+                    if px < width && py < height {
+                        block_pixels[(y * 4 + x) as usize] =
+                            Rgba32::from_pixel(image.get_pixel(px, py));
+                    } else {
+                        block_pixels[(y * 4 + x) as usize] = Rgba32::new(0, 0, 0, 255);
+                    }
+                }
+            }
+            let encoded = encode_etc1_block(&block_pixels);
+            data.extend_from_slice(&encoded.to_be_bytes());
+        }
     }
 
-    let mut writer = BitWriter::new();
+    // --- Palette Alpha Encode ---
 
-    for &alpha in data.iter().take(num_pixels) {
-        let val = alpha >> 4; // Quantize 8-bit to 4-bit
+    // Collect alpha values
+    let mut alphas = Vec::with_capacity(num_pixels);
+    for y in 0..height {
+        for x in 0..width {
+            alphas.push(image.get_pixel(x, y)[3]);
+        }
+    }
+
+    // Header: num = 16 (0x10)
+    data.push(0x10);
+    // Palette: 0..15 -> 0x00, 0x11, ... 0xFF
+    for i in 0..16 {
+        data.push(i as u8);
+    }
+
+    // Data: 4-bit indices (val >> 4)
+    let mut writer = BitWriter::new();
+    for &a in &alphas {
+        let val = a >> 4;
         writer.write_bits(val as u32, 4);
     }
+    data.append(&mut writer.flush());
 
-    out.append(&mut writer.flush());
-    out
+    Ok(data)
 }
 
 struct BitWriter {

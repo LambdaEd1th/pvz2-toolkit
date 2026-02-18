@@ -5,6 +5,7 @@ pub mod adpcm;
 pub mod bit_stream;
 pub mod error;
 pub mod pcm;
+pub mod process;
 pub mod vorbis;
 pub mod wav;
 

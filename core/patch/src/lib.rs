@@ -11,6 +11,7 @@ pub enum PatchError {
     RsbPatch(#[from] rsb_patch::RsbPatchError),
 }
 
+pub mod process;
 pub mod rsb_patch;
 pub type Result<T> = std::result::Result<T, PatchError>;
 

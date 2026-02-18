@@ -1,3 +1,5 @@
+pub mod process;
+pub mod process_ptx;
 pub mod types;
 use crate::types::{
     AutoPoolInfo, CompositeInfo, CompositePacketInfo, DescriptionGroup, DescriptionResources,
@@ -6,10 +8,10 @@ use crate::types::{
 };
 use byteorder::{LE, ReadBytesExt};
 pub mod error;
-pub mod utils;
 pub mod writer;
 use crate::error::{Result, RsbError};
-use crate::utils::read_file_list;
+use shared_utils::file_list::read_file_list;
+use shared_utils::{BinReadExt, read_string_at};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom};
 
@@ -158,7 +160,7 @@ impl<R: Read + Seek> Rsb<R> {
             // "var compositeName = RSBFile.readStringByEmpty();"
             // No, readStringByEmpty reads char by char.
             // Let's implement helper or read byte by byte.
-            let composite_name = self.read_string_null_term()?;
+            let composite_name = self.reader.read_null_term_string()?;
 
             // Packet number is at end of struct: start + each_length - 4
             self.reader.seek(SeekFrom::Start(
@@ -211,7 +213,7 @@ impl<R: Read + Seek> Rsb<R> {
 
         for _ in 0..self.header.autopool_number {
             let start = self.reader.stream_position()?;
-            let name = self.read_string_null_term()?;
+            let name = self.reader.read_null_term_string()?;
 
             self.reader.seek(SeekFrom::Start(start + 128))?;
             let part0_size = self.reader.read_u32::<LE>()?;
@@ -269,19 +271,6 @@ impl<R: Read + Seek> Rsb<R> {
         Ok(infos)
     }
 
-    // Helper to read string until null terminator
-    fn read_string_null_term(&mut self) -> Result<String> {
-        let mut bytes = Vec::new();
-        loop {
-            let byte = self.reader.read_u8()?;
-            if byte == 0 {
-                break;
-            }
-            bytes.push(byte);
-        }
-        Ok(String::from_utf8_lossy(&bytes).to_string())
-    }
-
     // Extraction helper (moved down to keep order clean)
     pub fn read_resources_description(
         &mut self,
@@ -309,7 +298,7 @@ impl<R: Read + Seek> Rsb<R> {
         // 1st Pass: Read Part 1 (Structure)
         while self.reader.stream_position()? < part2_offset {
             let id_offset_part3 = self.reader.read_u32::<LE>()?;
-            let id = self.read_string_at(part3_offset + id_offset_part3 as u64)?;
+            let id = read_string_at(&mut self.reader, part3_offset + id_offset_part3 as u64)?;
 
             let rsg_number = self.reader.read_u32::<LE>()?;
 
@@ -331,7 +320,8 @@ impl<R: Read + Seek> Rsb<R> {
                     .to_string();
 
                 let rsg_id_offset_part3 = self.reader.read_u32::<LE>()?;
-                let rsg_id = self.read_string_at(part3_offset + rsg_id_offset_part3 as u64)?;
+                let rsg_id =
+                    read_string_at(&mut self.reader, part3_offset + rsg_id_offset_part3 as u64)?;
 
                 let resources_number = self.reader.read_u32::<LE>()?;
 
@@ -389,10 +379,14 @@ impl<R: Read + Seek> Rsb<R> {
                             let res_id_offset = self.reader.read_u32::<LE>()?;
                             let path_offset = self.reader.read_u32::<LE>()?;
 
-                            let res_id =
-                                self.read_string_at(part3_offset + res_id_offset as u64)?;
-                            let res_path =
-                                self.read_string_at(part3_offset + path_offset as u64)?;
+                            let res_id = read_string_at(
+                                &mut self.reader,
+                                part3_offset + res_id_offset as u64,
+                            )?;
+                            let res_path = read_string_at(
+                                &mut self.reader,
+                                part3_offset + path_offset as u64,
+                            )?;
 
                             let props_num = self.reader.read_u32::<LE>()?;
 
@@ -409,8 +403,10 @@ impl<R: Read + Seek> Rsb<R> {
                                 let rows = self.reader.read_u16::<LE>()?.to_string();
                                 let cols = self.reader.read_u16::<LE>()?.to_string();
                                 let parent_offset_rel = self.reader.read_u32::<LE>()?;
-                                let parent =
-                                    self.read_string_at(part3_offset + parent_offset_rel as u64)?;
+                                let parent = read_string_at(
+                                    &mut self.reader,
+                                    part3_offset + parent_offset_rel as u64,
+                                )?;
 
                                 ptx_info = Some(PropertiesPtxInfo {
                                     imagetype,
@@ -433,8 +429,14 @@ impl<R: Read + Seek> Rsb<R> {
                                 let _check_prop = self.reader.read_u32::<LE>()?; // Should be 0
                                 let val_offset = self.reader.read_u32::<LE>()?;
 
-                                let key = self.read_string_at(part3_offset + key_offset as u64)?;
-                                let val = self.read_string_at(part3_offset + val_offset as u64)?;
+                                let key = read_string_at(
+                                    &mut self.reader,
+                                    part3_offset + key_offset as u64,
+                                )?;
+                                let val = read_string_at(
+                                    &mut self.reader,
+                                    part3_offset + val_offset as u64,
+                                )?;
                                 properties.insert(key, val);
                             }
 
@@ -454,15 +456,6 @@ impl<R: Read + Seek> Rsb<R> {
         }
 
         Ok(ResourcesDescription { groups })
-    }
-
-    // Helper for random access string reading
-    fn read_string_at(&mut self, offset: u64) -> Result<String> {
-        let current = self.reader.stream_position()?;
-        self.reader.seek(SeekFrom::Start(offset))?;
-        let s = self.read_string_null_term()?;
-        self.reader.seek(SeekFrom::Start(current))?;
-        Ok(s)
     }
 
     pub fn extract_packet(&mut self, info: &RsgInfo) -> Result<Vec<u8>> {

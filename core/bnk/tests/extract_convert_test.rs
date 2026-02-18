@@ -51,11 +51,12 @@ fn test_bulk_extract_and_convert() {
     for bnk_path in &bnk_files {
         // 1. Extract BNK -> WEMs
         let status = Command::new(&cli_path)
-            .arg("unpack-bnk")
+            .arg("bnk")
+            .arg("unpack")
             .arg(bnk_path)
             .current_dir(&root_dir)
             .status()
-            .expect("Failed to execute unpack-bnk");
+            .expect("Failed to execute bnk unpack");
 
         if !status.success() {
             println!("  Failed to extract {:?}", bnk_path);
@@ -78,11 +79,12 @@ fn test_bulk_extract_and_convert() {
         // 3. Convert WEMs -> OGG
         for wem_path in wem_files {
             let status_wem = Command::new(&cli_path)
-                .arg("convert-wem")
+                .arg("wem")
+                .arg("decode")
                 .arg(&wem_path)
                 .current_dir(&root_dir)
                 .status()
-                .expect("Failed to execute convert-wem");
+                .expect("Failed to execute wem decode");
 
             if !status_wem.success() {
                 println!(
@@ -237,7 +239,8 @@ fn test_repack_bnk_round_trip() {
     let json_path = output_dir.join("ZOMBOSS_MUSIC.json");
 
     let status_extract = Command::new(&cli_path)
-        .arg("unpack-bnk")
+        .arg("bnk")
+        .arg("unpack")
         .arg(&sample_bnk)
         .arg("--output")
         .arg(&json_path)
@@ -252,7 +255,8 @@ fn test_repack_bnk_round_trip() {
     let repacked_bnk = output_dir.join("ZOMBOSS_MUSIC_REPACKED.BNK");
 
     let status_repack = Command::new(&cli_path)
-        .arg("repack-bnk")
+        .arg("bnk")
+        .arg("pack")
         .arg("--json")
         .arg(&json_path)
         .arg("--wems")
@@ -269,7 +273,8 @@ fn test_repack_bnk_round_trip() {
     // Try to extract the repacked BNK to verify it's valid
     let repacked_json = output_dir.join("ZOMBOSS_MUSIC_REPACKED.json");
     let status_verify = Command::new(&cli_path)
-        .arg("unpack-bnk")
+        .arg("bnk")
+        .arg("unpack")
         .arg(&repacked_bnk)
         .arg("--output")
         .arg(&repacked_json)
@@ -342,7 +347,8 @@ fn test_pack_wem_round_trip() {
     // 3. WEM -> OGG
     let ogg_path = output_dir.join("temp.ogg");
     let status_convert = Command::new(&cli_path)
-        .arg("convert-wem")
+        .arg("wem")
+        .arg("decode")
         .arg(&sample_wem)
         .arg("--output")
         .arg(&ogg_path)
@@ -356,8 +362,8 @@ fn test_pack_wem_round_trip() {
     // 4. OGG -> WEM (Pack)
     let packed_wem_path = output_dir.join("packed.wem");
     let status_pack = Command::new(&cli_path)
-        .arg("pack-wem")
-        .arg("--input")
+        .arg("wem")
+        .arg("encode")
         .arg(&ogg_path)
         .arg("--output")
         .arg(&packed_wem_path)
@@ -371,7 +377,8 @@ fn test_pack_wem_round_trip() {
     // 5. Verify: WEM -> OGG again
     let verify_ogg_path = output_dir.join("verify.ogg");
     let status_verify = Command::new(&cli_path)
-        .arg("convert-wem")
+        .arg("wem")
+        .arg("decode")
         .arg(&packed_wem_path)
         .arg("--output")
         .arg(&verify_ogg_path)
@@ -476,8 +483,8 @@ fn test_pack_wav_round_trip() {
     // 3. Pack WAV -> WEM
     let wem_path = verify_dir.join("test_packed.wem");
     let status_pack = Command::new(&cli_path)
-        .arg("pack-wem")
-        .arg("--input")
+        .arg("wem")
+        .arg("encode")
         .arg(&wav_path)
         .arg("--output")
         .arg(&wem_path)
@@ -493,7 +500,8 @@ fn test_pack_wav_round_trip() {
     // 4. Verify (WEM -> WAV)
     let verify_wav_path = verify_dir.join("test_verify.wav");
     let status_verify = Command::new(&cli_path)
-        .arg("convert-wem")
+        .arg("wem")
+        .arg("decode")
         .arg(&wem_path)
         .arg("--output")
         .arg(&verify_wav_path)

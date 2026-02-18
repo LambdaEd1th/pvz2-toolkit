@@ -2,6 +2,8 @@ use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Seek, SeekFrom, Write};
 use thiserror::Error;
+use utils::{BinReadExt, BinWriteExt};
+pub mod process;
 
 #[derive(Error, Debug)]
 pub enum BnkError {
@@ -296,7 +298,7 @@ impl DidxEntry {
 impl InitEntry {
     fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
         writer.write_u32::<LE>(self.id)?;
-        write_string_null(writer, &self.name)?;
+        writer.write_null_term_string(&self.name)?;
         Ok(())
     }
 }
@@ -455,7 +457,7 @@ impl ReferenceEntry {
 
 impl PlatformSetting {
     fn write<W: Write>(&self, writer: &mut W) -> Result<()> {
-        write_string_null(writer, &self.platform)?;
+        writer.write_null_term_string(&self.platform)?;
         Ok(())
     }
 }
@@ -467,12 +469,6 @@ impl PlatformSetting {
 fn hex_space_to_bytes(hex_string: &str) -> Result<Vec<u8>> {
     let clean_string = hex_string.replace(' ', "");
     hex::decode(&clean_string).map_err(|e| BnkError::ParseError(format!("Invalid hex: {}", e)))
-}
-
-fn write_string_null<W: Write>(writer: &mut W, s: &str) -> Result<()> {
-    writer.write_all(s.as_bytes())?;
-    writer.write_u8(0)?;
-    Ok(())
 }
 
 fn parse_bnk<R: Read + Seek>(reader: &mut R, bnk: &mut Bnk) -> Result<()> {
@@ -562,7 +558,7 @@ fn parse_init<R: Read + Seek>(reader: &mut R, _size: u32, bnk: &mut Bnk) -> Resu
     let mut list = Vec::new();
     for _ in 0..count {
         let id = reader.read_u32::<LE>()?;
-        let name = read_string_null(reader)?;
+        let name = reader.read_null_term_string()?;
         list.push(InitEntry { id, name });
     }
     bnk.initialization = Some(list);
@@ -770,7 +766,7 @@ fn parse_stid<R: Read + Seek>(reader: &mut R, _size: u32, bnk: &mut Bnk) -> Resu
 }
 
 fn parse_plat<R: Read + Seek>(reader: &mut R, _size: u32, bnk: &mut Bnk) -> Result<()> {
-    let platform = read_string_null(reader)?;
+    let platform = reader.read_null_term_string()?;
     bnk.platform = Some(PlatformSetting { platform });
     Ok(())
 }
@@ -787,16 +783,4 @@ fn bytes_to_hex_space(bytes: &[u8]) -> String {
         result.push(c);
     }
     result
-}
-
-fn read_string_null<R: Read + Seek>(reader: &mut R) -> Result<String> {
-    let mut bytes = Vec::new();
-    loop {
-        let b = reader.read_u8()?;
-        if b == 0 {
-            break;
-        }
-        bytes.push(b);
-    }
-    Ok(String::from_utf8_lossy(&bytes).to_string())
 }

@@ -2,6 +2,7 @@ mod binary;
 mod constants;
 mod de;
 mod error;
+pub mod process;
 mod rtid;
 mod ser;
 mod value;

@@ -1,5 +1,6 @@
-use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 pub mod error;
+pub mod process;
 use crate::error::{Result, RsbError};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
@@ -115,7 +116,7 @@ pub fn decode_newton(mut reader: impl Read) -> Result<MResourceGroup> {
                 return Err(RsbError::DeserializationError(format!(
                     "Unknown group type: {}",
                     group_type_byte
-                )))
+                )));
             }
         }
         .to_string();
@@ -315,7 +316,7 @@ pub fn encode_newton(resource: &MResourceGroup, mut writer: impl Write) -> Resul
                 return Err(RsbError::DeserializationError(format!(
                     "Unknown group type: {}",
                     group.group_type
-                )))
+                )));
             }
         }
 
@@ -373,7 +374,7 @@ pub fn encode_newton(resource: &MResourceGroup, mut writer: impl Write) -> Resul
                             return Err(RsbError::DeserializationError(format!(
                                 "Unknown resource type: {}",
                                 res.res_type
-                            )))
+                            )));
                         }
                     };
                     writer.write_u8(type_byte)?;

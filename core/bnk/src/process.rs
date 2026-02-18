@@ -1,0 +1,160 @@
+use anyhow::{Context, Result};
+use byteorder::{LE, WriteBytesExt};
+use std::fs;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+
+use crate::{Bnk, DidxEntry};
+
+pub fn unpack_bnk(input: &Path, output: &Option<PathBuf>, no_extract: bool) -> Result<()> {
+    let file = fs::File::open(input).context("Failed to open input BNK file")?;
+    let mut reader = std::io::BufReader::new(file);
+    let bnk = Bnk::new(&mut reader)?;
+
+    let out_dir = match output {
+        Some(p) => p.clone(),
+        None => {
+            let file_stem = input.file_stem().unwrap_or_default();
+            PathBuf::from(file_stem)
+        }
+    };
+
+    if !out_dir.exists() {
+        fs::create_dir_all(&out_dir)?;
+    }
+
+    println!("Unpacking BNK to {:?}", out_dir);
+
+    // Save JSON
+    let json_path = out_dir.join("bank_header.json");
+    let json = serde_json::to_string_pretty(&bnk)?;
+    fs::write(&json_path, json)?;
+    println!("  Saved header to {:?}", json_path);
+
+    // Extract Audio
+    if !no_extract {
+        if let Some(offset) = bnk.data_chunk_offset {
+            reader.seek(SeekFrom::Start(offset))?;
+            // We need to read relative to DATA chunk start
+            let data_start = offset;
+
+            for (_i, entry) in bnk.data_index.iter().enumerate() {
+                // Prefix _i for unused
+                let entry_offset = data_start + entry.offset as u64;
+                let entry_size = entry.size;
+
+                reader.seek(SeekFrom::Start(entry_offset))?;
+                let mut buf = vec![0u8; entry_size as usize];
+                reader.read_exact(&mut buf)?;
+
+                let ext = "wem"; // Default to wem, maybe detect type?
+                let file_name = format!("{}.{}", entry.id, ext);
+                let file_path = out_dir.join(&file_name);
+                fs::write(&file_path, &buf)?;
+                println!("  Extracted {} ({} bytes)", file_name, entry_size);
+            }
+        } else {
+            println!("  Skipping audio extraction.");
+        }
+    } else {
+        println!("  Skipping audio extraction.");
+    }
+
+    Ok(())
+}
+
+pub fn pack_bnk(json_path: &Path, wems_path: &Path, output: &Path) -> Result<()> {
+    // Input is folder containing bank_header.json and wem files
+    // let json_path = input.join("bank_header.json"); // Removed
+    let json_content = fs::read_to_string(json_path).context("Failed to read bank_header.json")?;
+    let mut bnk: Bnk = serde_json::from_str(&json_content)?;
+
+    // Reconstruct Data Index and Data Chunk
+    // We assume the user wants to repack all files referenced in DIDX or Embedded Media?
+    // Sen logic: Iterate over WEM files in folder? Or trust JSON?
+    // For now, let's trust JSON embedded_media IDs if available, or just check what is there.
+    // Better: Allow user to provide wem files matching IDs in the JSON/Folder.
+
+    // If embedded_media exists, use it to find files
+    let mut data_blob = Vec::new();
+    let mut new_didx = Vec::new();
+    let mut current_offset = 0;
+
+    // Use embedded_media as source of truth for IDs order?
+    // Or just look for any numbered .wem files?
+    // "Sen" usually packs based on existing data if we are repacking.
+    // If we unpacked, we have a list of IDs in `didx` (which was not serialized to JSON directly, but embedded_media has IDs).
+
+    // Correct approach for repacking:
+    // 1. Read all WEMs in the folder that match IDs in `embedded_media`.
+    // 2. Build DATA chunk and DIDX chunk.
+
+    // If embedded_media is empty, maybe scan directory?
+    let ids_to_pack = if !bnk.embedded_media.is_empty() {
+        bnk.embedded_media.clone()
+    } else {
+        // Fallback: Scan directory for <id>.wem
+        let mut ids = Vec::new();
+        for entry in fs::read_dir(wems_path)? {
+            let entry = entry?;
+            let path = entry.path();
+            if let Some(ext) = path.extension() {
+                if ext == "wem" {
+                    if let Some(stem) = path.file_stem() {
+                        if let Ok(id) = stem.to_string_lossy().parse::<u32>() {
+                            ids.push(id);
+                        }
+                    }
+                }
+            }
+        }
+        ids.sort();
+        ids
+    };
+
+    for id in &ids_to_pack {
+        let filename = format!("{}.wem", id);
+        let path = wems_path.join(&filename);
+        if path.exists() {
+            let mut data = fs::read(&path)?;
+            let size = data.len() as u32;
+
+            // Padding alignment (16 bytes usually for Wwise?)
+            // Sen uses 16 byte alignment for DATA entries
+            let padding = (16 - (size % 16)) % 16;
+
+            new_didx.push(DidxEntry {
+                id: *id,
+                offset: current_offset,
+                size,
+            });
+
+            data_blob.append(&mut data);
+            data_blob.extend(std::iter::repeat(0).take(padding as usize));
+
+            current_offset += size + padding;
+        } else {
+            println!("Warning: WEM file {} not found, skipping.", filename);
+        }
+    }
+
+    bnk.data_index = new_didx;
+    // Update embedded_media if we collected from dir
+    if bnk.embedded_media.is_empty() {
+        bnk.embedded_media = ids_to_pack;
+    }
+
+    let mut out_file = fs::File::create(output)?;
+    bnk.write(&mut out_file)?;
+
+    // 4. Write DATA chunk
+    // 4. Write DATA chunk
+    if !data_blob.is_empty() {
+        out_file.write_all(b"DATA")?;
+        out_file.write_u32::<LE>(data_blob.len() as u32)?;
+        out_file.write_all(&data_blob)?;
+    }
+    println!("Packed BNK to {:?}", output);
+
+    Ok(())
+}

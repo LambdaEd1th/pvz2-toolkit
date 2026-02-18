@@ -1,3 +1,4 @@
+pub mod process;
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use flate2::Compression;
 use flate2::read::ZlibDecoder;

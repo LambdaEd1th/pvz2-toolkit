@@ -248,120 +248,18 @@ impl<W: Write + Seek> RsbWriter<W> {
     }
 
     pub fn write_file_list(&mut self, file_list: &Vec<FileListInfo>) -> Result<(u32, u32)> {
-        // Sort first
-        let mut sorted_list = file_list.clone();
-        sorted_list.sort_by(|a, b| a.name_path.cmp(&b.name_path));
-
-        let mut path_temp_list: Vec<RsbPathTemp> = Vec::new();
-
-        // Emulate FileListPack logic
-        // Insert dummy empty at start for comparison logic
-        let mut process_list = sorted_list.clone();
-        process_list.insert(
-            0,
-            FileListInfo {
-                name_path: "".to_string(),
-                pool_index: -1,
-            },
-        );
-
-        let list_length = process_list.len() - 1;
-        let mut w_position = 0;
-
-        for i in 0..list_length {
-            let path1 = process_list[i].name_path.to_uppercase();
-            let path2 = process_list[i + 1].name_path.to_uppercase();
-
-            // Validate ASCII - simplest check
-            if !path2.is_ascii() {
-                return Err(crate::error::RsbError::Other(
-                    "Item part must be ASCII".to_string(),
-                ));
-            }
-
-            let len1 = path1.len();
-            let len2 = path2.len();
-            let str_longest_length = std::cmp::max(len1, len2);
-
-            for k in 0..str_longest_length {
-                let char1 = if k < len1 { path1.as_bytes()[k] } else { 0 };
-                let char2 = if k < len2 { path2.as_bytes()[k] } else { 0 };
-
-                if k >= len1 || k >= len2 || char1 != char2 {
-                    // Found divergent point/end
-
-                    // Look for back-reference in path_temp_list
-                    let len_temp = path_temp_list.len();
-                    let mut matched_idx = None;
-
-                    for h in (0..len_temp).rev() {
-                        if k >= path_temp_list[h].key {
-                            matched_idx = Some(h);
-                            break;
-                        }
-                    }
-
-                    if let Some(h) = matched_idx {
-                        let key = path_temp_list[h].key;
-                        path_temp_list[h].positions.push(PathPosition {
-                            position: w_position,
-                            offset: k - key,
-                        });
-                    }
-
-                    w_position += (len2 - k) as u32 + 2; // +1 for string end? + around?
-
-                    path_temp_list.push(RsbPathTemp {
-                        path_slice: path2[k..].to_string(),
-                        key: k,
-                        pool_index: process_list[i + 1].pool_index,
-                        positions: Vec::new(),
-                    });
-                    break;
-                }
-            }
-        }
-
         let start_offset = self.writer.stream_position()? as u32;
 
-        for temp in &path_temp_list {
-            self.write_file_list_entry(temp)?;
-        }
+        let items: Vec<(String, i32)> = file_list
+            .iter()
+            .map(|info| (info.name_path.clone(), info.pool_index))
+            .collect();
+
+        use shared_utils::file_list::write_file_list;
+        write_file_list(&mut self.writer, start_offset as u64, &items)?;
 
         let end_offset = self.writer.stream_position()? as u32;
         Ok((start_offset, end_offset - start_offset))
-    }
-
-    fn write_file_list_entry(&mut self, path_temp: &RsbPathTemp) -> Result<()> {
-        let begin_offset = self.writer.stream_position()?;
-
-        // Write string 4-byte encoded
-        for b in path_temp.path_slice.bytes() {
-            let encoded = (b.wrapping_mul(2)).wrapping_add(2);
-            self.writer.write_u8(encoded)?;
-            self.writer.write_u8(0)?; // Padding/Placeholder
-            self.writer.write_u8(0)?;
-            self.writer.write_u8(0)?;
-        }
-        // Null terminator equivalent (encoded 0 -> 2)
-        self.writer.write_u8(2)?;
-        self.writer.write_u8(0)?;
-        self.writer.write_u8(0)?;
-        self.writer.write_u8(0)?;
-
-        let current_pos = self.writer.stream_position()?;
-
-        // Patch positions
-        for pos in &path_temp.positions {
-            let patch_offset = begin_offset + (pos.offset as u64 * 4) + 1;
-            self.writer.seek(std::io::SeekFrom::Start(patch_offset))?;
-            self.writer.write_u24::<LE>(pos.position)?;
-        }
-
-        self.writer.seek(std::io::SeekFrom::Start(current_pos))?;
-        self.writer.write_i32::<LE>(path_temp.pool_index)?;
-
-        Ok(())
     }
 
     pub fn write_composite_info(
@@ -545,16 +443,4 @@ impl<W: Write + Seek> RsbWriter<W> {
         self.writer.write_all(&bytes)?;
         Ok(())
     }
-}
-
-struct RsbPathTemp {
-    path_slice: String,
-    key: usize,
-    pool_index: i32,
-    positions: Vec<PathPosition>,
-}
-
-struct PathPosition {
-    position: u32,
-    offset: usize,
 }

@@ -9,3 +9,4 @@ byteorder = "1.5"
 hound = "3.5"
 ogg = "0.9.2"
 symphonia = { version = "0.5.3", features = ["aac", "isomp4", "vorbis", "ogg"] }
+anyhow = "1.0"

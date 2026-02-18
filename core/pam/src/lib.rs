@@ -5,6 +5,7 @@ use std::io::{Read, Seek};
 
 pub mod encode;
 pub mod html5;
+pub mod process;
 
 pub use encode::encode_pam;
 
