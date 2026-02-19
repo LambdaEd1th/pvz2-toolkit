@@ -8,4 +8,3 @@ flate2 = "1.0"
 byteorder = "1.5"
 thiserror = "1.0"
 md5 = { package = "md-5", version = "0.10.6" }
-anyhow = "1.0"

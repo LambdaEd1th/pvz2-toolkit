@@ -1,22 +1,14 @@
+pub mod error;
 pub mod process;
+
+use crate::error::SmfError;
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
-use std::io::{self, Read, Write};
-use thiserror::Error;
+use std::io::{Read, Seek, Write};
 
-#[derive(Error, Debug)]
-pub enum SmfError {
-    #[error("IO Error: {0}")]
-    Io(#[from] io::Error),
-    #[error("Invalid Magic: expected 0xDEADFED4, got {0:#010x}")]
-    InvalidMagic(u32),
-}
-
-const SMF_MAGIC: u32 = 0xDEADFED4;
-
-use std::io::Seek;
+pub const SMF_MAGIC: u32 = 0xDEADFED4;
 
 pub fn decode<R: Read + Seek>(mut reader: R, use_64bit: bool) -> Result<Vec<u8>, SmfError> {
     let magic = reader.read_u32::<LE>()?;

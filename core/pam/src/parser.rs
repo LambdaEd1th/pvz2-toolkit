@@ -1,4 +1,4 @@
-use crate::PamInfo;
+use crate::types::PamInfo;
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;

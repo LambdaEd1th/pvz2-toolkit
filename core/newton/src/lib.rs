@@ -1,7 +1,7 @@
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 pub mod error;
 pub mod process;
-use crate::error::{Result, RsbError};
+use crate::error::{NewtonError, Result};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};
 
@@ -94,7 +94,7 @@ impl ResourceType {
             5 => Ok(ResourceType::PrimeFont),
             6 => Ok(ResourceType::RenderEffect),
             7 => Ok(ResourceType::DecodedSoundBank),
-            _ => Err(RsbError::DeserializationError(format!(
+            _ => Err(NewtonError::DeserializationError(format!(
                 "Unknown resource type: {}",
                 v
             ))),
@@ -113,7 +113,7 @@ pub fn decode_newton(mut reader: impl Read) -> Result<MResourceGroup> {
             1 => "composite",
             2 => "simple",
             _ => {
-                return Err(RsbError::DeserializationError(format!(
+                return Err(NewtonError::DeserializationError(format!(
                     "Unknown group type: {}",
                     group_type_byte
                 )));
@@ -133,7 +133,7 @@ pub fn decode_newton(mut reader: impl Read) -> Result<MResourceGroup> {
 
         let version = reader.read_u8()?;
         if version != 1 {
-            return Err(RsbError::DeserializationError(format!(
+            return Err(NewtonError::DeserializationError(format!(
                 "Unknown version number: {}",
                 version
             )));
@@ -153,7 +153,7 @@ pub fn decode_newton(mut reader: impl Read) -> Result<MResourceGroup> {
 
         if group_type == "composite" {
             if resources_count != 0 {
-                return Err(RsbError::DeserializationError(
+                return Err(NewtonError::DeserializationError(
                     "Composite group cannot have resources".into(),
                 ));
             }
@@ -174,7 +174,7 @@ pub fn decode_newton(mut reader: impl Read) -> Result<MResourceGroup> {
             subgroups = Some(sub_list);
         } else if group_type == "simple" {
             if subgroups_count != 0 {
-                return Err(RsbError::DeserializationError(
+                return Err(NewtonError::DeserializationError(
                     "Simple group cannot have subgroups".into(),
                 ));
             }
@@ -313,7 +313,7 @@ pub fn encode_newton(resource: &MResourceGroup, mut writer: impl Write) -> Resul
             "composite" => writer.write_u8(1)?,
             "simple" => writer.write_u8(2)?,
             _ => {
-                return Err(RsbError::DeserializationError(format!(
+                return Err(NewtonError::DeserializationError(format!(
                     "Unknown group type: {}",
                     group.group_type
                 )));
@@ -371,7 +371,7 @@ pub fn encode_newton(resource: &MResourceGroup, mut writer: impl Write) -> Resul
                         "RenderEffect" => 6,
                         "DecodedSoundBank" => 7,
                         _ => {
-                            return Err(RsbError::DeserializationError(format!(
+                            return Err(NewtonError::DeserializationError(format!(
                                 "Unknown resource type: {}",
                                 res.res_type
                             )));

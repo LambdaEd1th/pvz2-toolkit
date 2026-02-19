@@ -8,4 +8,3 @@ byteorder = "1.5.0"
 # vcdiff replacement (pure Rust VCDIFF/RFC 3284)
 oxidelta = "0.1.4"
 thiserror = "1.0"
-anyhow = "1.0"

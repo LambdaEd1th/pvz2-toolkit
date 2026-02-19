@@ -1,12 +1,10 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use integer_encoding::VarIntReader;
 use serde::de::{self, DeserializeOwned};
-use simple_rijndael::impls::RijndaelCbc;
-use simple_rijndael::paddings::ZeroPadding;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
-use crate::constants::{FILE_HEADER, FILE_VERSION, RtidIdentifier, RtonIdentifier};
 use crate::error::{Error, Result};
+use crate::types::{FILE_HEADER, FILE_VERSION, RtidIdentifier, RtonIdentifier};
 
 pub struct RtonDeserializer<'de, R> {
     reader: R,
@@ -92,24 +90,12 @@ fn validate_header_and_decrypt<R: Read>(
     if header_start == [0x10, 0x00] {
         let key_str = key_seed.ok_or(Error::MissingKey)?;
 
-        // Derive Key and IV from key_str (MD5)
-        let digest = md5::compute(key_str).0; // [u8; 16]
-        let hex_string = hex::encode(digest); // String (32 chars)
-        let hex_bytes = hex_string.as_bytes(); // &[u8] (32 bytes)
-
-        let key = hex_bytes.to_vec(); // 32 bytes (256 bits)
-        let iv = hex_bytes[4..28].to_vec(); // 24 bytes (192 bits)
-        let block_size = 24;
-
-        // Decrypt
+        // Read ciphertext
         let mut cipher_text = Vec::new();
         reader.read_to_end(&mut cipher_text)?;
 
-        let cipher = RijndaelCbc::<ZeroPadding>::new(&key, block_size)
-            .map_err(|e| Error::DecryptionError(format!("Cipher init failed: {:?}", e)))?;
-
-        let decrypted = cipher
-            .decrypt(&iv, cipher_text)
+        // Decrypt using shared crypto module
+        let decrypted = crate::crypto::decrypt_data(&cipher_text, key_str)
             .map_err(|e| Error::DecryptionError(format!("Decryption failed: {:?}", e)))?;
 
         // Validating the inner content logic is handled by the caller recursively calling standard methods

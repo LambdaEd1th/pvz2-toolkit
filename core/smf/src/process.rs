@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::Result;
 use md5::{Digest, Md5};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use crate::{decode, encode};
 
 pub fn smf_unpack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> Result<()> {
-    let mut file = fs::File::open(input).context("Failed to open input file")?;
-    let decoded = decode(&mut file, use_64bit).context("Failed to decode SMF")?;
+    let mut file = fs::File::open(input)?;
+    let decoded = decode(&mut file, use_64bit)?;
 
     let out_path = match output {
         Some(p) => p.clone(),
@@ -20,13 +20,13 @@ pub fn smf_unpack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> Re
         }
     };
 
-    fs::write(&out_path, decoded).context("Failed to write output file")?;
+    fs::write(&out_path, decoded)?;
     println!("Unpacked SMF to {:?}", out_path);
     Ok(())
 }
 
 pub fn smf_pack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> Result<()> {
-    let data = fs::read(input).context("Failed to read input file")?;
+    let data = fs::read(input)?;
 
     let out_path = match output {
         Some(p) => p.clone(),
@@ -46,9 +46,9 @@ pub fn smf_pack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> Resu
 
     let mut buffer = Vec::new();
     // Encode to buffer first to calculate MD5
-    encode(&mut buffer, &data, use_64bit).context("Failed to encode SMF")?;
+    encode(&mut buffer, &data, use_64bit)?;
 
-    fs::write(&out_path, &buffer).context("Failed to write output file")?;
+    fs::write(&out_path, &buffer)?;
     println!("Packed SMF to {:?}", out_path);
 
     // Calculate MD5 of the generated SMF file
@@ -84,7 +84,7 @@ pub fn smf_pack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> Resu
     };
 
     let tag_content = format!("{}\r\n", md5_hex);
-    fs::write(&tag_path, tag_content).context("Failed to write .tag.smf file")?;
+    fs::write(&tag_path, tag_content)?;
     println!("Generated Tag to {:?}", tag_path);
 
     Ok(())

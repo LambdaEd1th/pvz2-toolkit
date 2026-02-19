@@ -1,19 +1,34 @@
-pub mod error;
-
 pub mod codec;
 pub mod color;
 pub mod decoder;
 pub mod encoder;
+pub mod error;
+pub mod process;
 pub mod types;
 
 pub use decoder::PtxDecoder;
 pub use encoder::PtxEncoder;
+pub use process::{decode_ptx, encode_ptx};
 pub use types::PtxFormat;
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use image::{DynamicImage, Rgba};
+
+    #[test]
+    fn test_process_wrappers() {
+        // Simple test to verify wrappers work
+        let width = 64;
+        let height = 64;
+        let img = DynamicImage::new_rgba8(width, height);
+        let encoded = encode_ptx(&img, PtxFormat::Rgba8888).unwrap();
+        assert_eq!(encoded.len(), (width * height * 4) as usize);
+
+        // Decode check
+        let decoded = decode_ptx(&encoded, width, height, 0, None, None, false).unwrap();
+        assert_eq!(decoded.width(), width);
+    }
 
     #[test]
     fn test_rgba8888_decoding() {

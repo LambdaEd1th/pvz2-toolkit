@@ -1,7 +1,7 @@
 use thiserror::Error;
 
 #[derive(Error, Debug)]
-pub enum RsbError {
+pub enum RsgError {
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Invalid magic: expected {0}, found {1}")]
@@ -22,4 +22,4 @@ pub enum RsbError {
     DeserializationError(String),
 }
 
-pub type Result<T> = std::result::Result<T, RsbError>;
+pub type Result<T> = std::result::Result<T, RsgError>;

@@ -1,19 +1,11 @@
-use std::io::{self, Read, Write};
-use thiserror::Error;
+use std::io::{Read, Write};
 
-#[derive(Error, Debug)]
-pub enum PatchError {
-    #[error("IO error: {0}")]
-    Io(#[from] io::Error),
-    #[error("VCDiff error: {0}")]
-    VCDiff(String),
-    #[error("RSB Patch error: {0}")]
-    RsbPatch(#[from] rsb_patch::RsbPatchError),
-}
-
+pub mod error;
+pub mod io;
 pub mod process;
-pub mod rsb_patch;
-pub type Result<T> = std::result::Result<T, PatchError>;
+pub mod types;
+
+pub use error::{PatchError, Result};
 
 /// Encodes a patch (diff) between source (dictionary) and target.
 /// Uses VCDiff format with interleaved instruction encoding.

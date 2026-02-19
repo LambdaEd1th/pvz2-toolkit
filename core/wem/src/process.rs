@@ -1,6 +1,5 @@
-use anyhow::{Context, Result};
 use std::fs;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use crate::CodebookLibrary;
@@ -8,6 +7,7 @@ use crate::WwiseRiffVorbis;
 use crate::aac;
 use crate::aac::M4aToWem;
 use crate::adpcm::WavToAdpcm;
+use crate::error::{WemError, WemResult};
 use crate::pcm::WavToWem;
 use crate::vorbis::encoder::OggToWem;
 use crate::wav;
@@ -17,8 +17,9 @@ pub fn wem_decode(
     output: &Option<PathBuf>,
     codebooks: &Option<String>,
     inline_codebooks: bool,
-) -> Result<()> {
-    let mut file = fs::File::open(input)?;
+) -> WemResult<()> {
+    let mut file =
+        fs::File::open(input).map_err(|e| WemError::file_open(format!("{:?}: {}", input, e)))?;
 
     // Auto-detect format
     let format_tag = wav::get_wem_format(&mut file).unwrap_or(0);
@@ -43,7 +44,8 @@ pub fn wem_decode(
 
     // Codebook handling (always needed for Vorbis, even repack)
     let codebooks_lib = if let Some(path_str) = codebooks {
-        CodebookLibrary::from_file(path_str).context("Failed to load external codebooks")?
+        CodebookLibrary::from_file(path_str)
+            .map_err(|e| WemError::codebook(format!("Failed to load external codebooks: {}", e)))?
     } else {
         CodebookLibrary::embedded_aotuv()
     };
@@ -60,11 +62,11 @@ pub fn wem_decode(
                     .inline_codebooks(inline_codebooks)
                     .full_setup(inline_codebooks)
                     .build()
-                    .map_err(|e| anyhow::anyhow!("Vorbis init failed: {:?}", e))?;
+                    .map_err(|e| WemError::parse(format!("Vorbis init failed: {:?}", e)))?;
 
             converter
                 .generate_ogg(&mut out_file)
-                .map_err(|e| anyhow::anyhow!("OGG generation failed: {:?}", e))?;
+                .map_err(|e| WemError::parse(format!("OGG generation failed: {:?}", e)))?;
         }
         0xAAC0 => {
             // AAC -> M4A (Extract)
@@ -73,7 +75,8 @@ pub fn wem_decode(
             let mut buffer = Vec::new();
             file.read_to_end(&mut buffer)?;
             let cursor = std::io::Cursor::new(buffer);
-            aac::extract_wem_aac(cursor, &mut out_file).context("Failed to extract AAC")?;
+            aac::extract_wem_aac(cursor, &mut out_file)
+                .map_err(|e| WemError::parse(format!("Failed to extract AAC: {}", e)))?;
         }
         _ => {
             // PCM/ADPCM -> WAV (Decode)
@@ -81,7 +84,7 @@ pub fn wem_decode(
             let reader = std::io::BufReader::new(file);
             // pass codebooks by reference
             wav::wem_to_wav(reader, &mut out_file, &codebooks_lib)
-                .map_err(|e| anyhow::anyhow!("WAV decoding failed: {:?}", e))?;
+                .map_err(|e| WemError::parse(format!("WAV decoding failed: {:?}", e)))?;
         }
     }
 
@@ -89,7 +92,7 @@ pub fn wem_decode(
     Ok(())
 }
 
-pub fn wem_encode(input: &Path, output: &Option<PathBuf>, adpcm: bool) -> Result<()> {
+pub fn wem_encode(input: &Path, output: &Option<PathBuf>, adpcm: bool) -> WemResult<()> {
     let extension = input
         .extension()
         .and_then(|e| e.to_str())
@@ -106,43 +109,60 @@ pub fn wem_encode(input: &Path, output: &Option<PathBuf>, adpcm: bool) -> Result
         println!("Encoding M4A/AAC: {:?}", input);
 
         // 1. Probe Metadata
-        let (channels, sample_rate, avg_bytes) = crate::aac::probe_m4a_metadata(input)?;
+        match crate::aac::probe_m4a_metadata(input) {
+            Ok((channels, sample_rate, avg_bytes)) => {
+                println!("  Detected: {} Hz, {} Channels", sample_rate, channels);
 
-        println!("  Detected: {} Hz, {} Channels", sample_rate, channels);
+                // 2. Pack
+                let file = fs::File::open(input)?;
+                let mut packer = M4aToWem::new(file)
+                    .map_err(|e| WemError::parse(format!("M4A init failed: {:?}", e)))?;
+                packer.set_metadata(channels, sample_rate, avg_bytes);
 
-        // 2. Pack
-        let file = fs::File::open(input)?;
-        let mut packer = M4aToWem::new(file)?;
-        packer.set_metadata(channels, sample_rate, avg_bytes);
-
-        let mut out_file = fs::File::create(&output)?;
-        packer.process(&mut out_file)?;
+                let mut out_file = fs::File::create(&output)?;
+                packer
+                    .process(&mut out_file)
+                    .map_err(|e| WemError::parse(format!("M4A processing failed: {:?}", e)))?;
+            }
+            Err(e) => return Err(WemError::parse(format!("Failed to probe M4A: {}", e))),
+        }
     } else if extension == "wav" {
         // WAV Path (PCM or ADPCM)
         println!("Encoding WAV: {:?}", input);
-        let file = fs::File::open(input).context("Failed to open input WAV")?;
-        let mut out_file = fs::File::create(&output).context("Failed to create output WEM")?;
+        let file = fs::File::open(input)
+            .map_err(|e| WemError::file_open(format!("{:?}: {}", input, e)))?;
+        let mut out_file = fs::File::create(&output)?;
 
         if adpcm {
             println!("  Encoding to ADPCM...");
-            let mut packer = WavToAdpcm::new(file)?;
-            packer.process(&mut out_file)?;
+            let mut packer = WavToAdpcm::new(file)
+                .map_err(|e| WemError::parse(format!("ADPCM init failed: {:?}", e)))?;
+            packer
+                .process(&mut out_file)
+                .map_err(|e| WemError::parse(format!("ADPCM processing failed: {:?}", e)))?;
         } else {
             println!("  Encoding to PCM...");
-            let mut packer = WavToWem::new(file)?;
-            packer.process(&mut out_file)?;
+            let mut packer = WavToWem::new(file)
+                .map_err(|e| WemError::parse(format!("PCM init failed: {:?}", e)))?;
+            packer
+                .process(&mut out_file)
+                .map_err(|e| WemError::parse(format!("PCM processing failed: {:?}", e)))?;
         }
     } else if extension == "ogg" || extension == "logg" {
         // OGG Path (Default)
         println!("Encoding OGG: {:?}", input);
-        let file = fs::File::open(input).context("Failed to open input OGG")?;
+        let file = fs::File::open(input)
+            .map_err(|e| WemError::file_open(format!("{:?}: {}", input, e)))?;
         let mut packer = OggToWem::new(file);
-        let mut out_file = fs::File::create(&output).context("Failed to create output WEM")?;
+        let mut out_file = fs::File::create(&output)?;
         packer
             .process(&mut out_file)
-            .context("Failed to pack WEM")?;
+            .map_err(|e| WemError::parse(format!("Failed to pack WEM: {}", e)))?;
     } else {
-        anyhow::bail!("Unsupported file extension: .{}", extension);
+        return Err(WemError::parse(format!(
+            "Unsupported file extension: .{}",
+            extension
+        )));
     }
 
     println!("Encoded WEM to {:?}", output);

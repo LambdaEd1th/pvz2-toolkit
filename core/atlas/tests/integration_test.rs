@@ -1,10 +1,9 @@
-use anyhow::Result;
-use atlas::json::{OfficialAtlas, PathOrPaths, Resource};
+use atlas::types::{OfficialAtlas, PathOrPaths, Resource};
 use image::{ImageReader, Rgba, RgbaImage};
 use std::fs;
 
 #[test]
-fn test_split_atlas_integration() -> Result<()> {
+fn test_split_atlas_integration() -> Result<(), Box<dyn std::error::Error>> {
     let temp_dir = tempfile::tempdir()?;
     let root = temp_dir.path();
 

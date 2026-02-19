@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{decode_pam, encode_pam, html5::parse_html_pam};
+use crate::{decode_pam, encode_pam, parser::parse_html_pam};
 
 pub fn pam_decode(input: &Path, output: &Option<PathBuf>) -> Result<()> {
     // Decode PAM -> JSON

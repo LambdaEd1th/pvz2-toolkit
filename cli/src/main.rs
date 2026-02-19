@@ -292,6 +292,28 @@ enum RtonCommands {
         #[arg(long)]
         seed: Option<String>,
     },
+    /// Encrypt RTON/File
+    Encrypt {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Encryption Seed (required)
+        #[arg(long)]
+        seed: String,
+    },
+    /// Decrypt RTON/File
+    Decrypt {
+        /// Input file
+        input: PathBuf,
+        /// Output file (optional)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Encryption Seed (required)
+        #[arg(long)]
+        seed: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -431,6 +453,16 @@ fn main() -> anyhow::Result<()> {
                 output,
                 seed,
             } => rton_encode(input, output, seed.as_deref())?,
+            RtonCommands::Encrypt {
+                input,
+                output,
+                seed,
+            } => rton::process::rton_encrypt_file(input, output, seed)?,
+            RtonCommands::Decrypt {
+                input,
+                output,
+                seed,
+            } => rton::process::rton_decrypt_file(input, output, seed)?,
         },
         Commands::Newton(cmd) => match cmd {
             NewtonCommands::Decode { input, output } => newton_decode(input, output)?,

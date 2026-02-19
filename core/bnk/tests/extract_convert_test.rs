@@ -1,7 +1,9 @@
 use bnk::Bnk;
 use std::fs;
+use std::io::Read;
 use std::io::Seek;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use wem::CodebookLibrary;
 use wem::WwiseRiffVorbis;
 
@@ -45,15 +47,23 @@ fn test_bulk_extract_and_convert() {
         bnk_files.len()
     );
 
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    println!("Extracting to temp dir: {:?}", temp_dir.path());
+
     let mut successes = 0;
     let mut failures = 0;
 
     for bnk_path in &bnk_files {
-        // 1. Extract BNK -> WEMs
+        let bnk_stem = bnk_path.file_stem().unwrap();
+        let target_dir = temp_dir.path().join(bnk_stem);
+
+        // 1. Extract BNK -> WEMs (to temp dir)
         let status = Command::new(&cli_path)
             .arg("bnk")
             .arg("unpack")
             .arg(bnk_path)
+            .arg("--output")
+            .arg(&target_dir)
             .current_dir(&root_dir)
             .status()
             .expect("Failed to execute bnk unpack");
@@ -65,8 +75,8 @@ fn test_bulk_extract_and_convert() {
         }
 
         // 2. Find extracted WEMs
-        let bnk_stem = bnk_path.file_stem().unwrap();
-        let extract_dir = bnk_path.parent().unwrap().join(bnk_stem);
+        // unpack_bnk creates output directory if specified
+        let extract_dir = target_dir;
 
         if !extract_dir.exists() {
             // Empty BNK or similar
@@ -82,6 +92,8 @@ fn test_bulk_extract_and_convert() {
                 .arg("wem")
                 .arg("decode")
                 .arg(&wem_path)
+                // Output to same temp dir (implicit or explicit)
+                // Default is same dir, which is fine since it's temp
                 .current_dir(&root_dir)
                 .status()
                 .expect("Failed to execute wem decode");
@@ -101,8 +113,6 @@ fn test_bulk_extract_and_convert() {
     println!("  BNKs Processed: {}", successes + failures);
     println!("  Failures (BNK extraction): {}", failures);
 }
-
-use std::process::Command; // Ensure this import exists or add it
 
 #[test]
 fn test_find_truncated_wem() {
@@ -199,8 +209,6 @@ fn collect_files(dir: &Path, extension: &str, results: &mut Vec<PathBuf>) {
     }
 }
 
-use std::io::Read;
-
 #[test]
 fn test_repack_bnk_round_trip() {
     // 1. Setup paths
@@ -230,28 +238,34 @@ fn test_repack_bnk_round_trip() {
     }
 
     // 3. Extract it first (to get JSON and WEMs)
-    let output_dir = final_verify_dir.join("repack_test");
-    if output_dir.exists() {
-        fs::remove_dir_all(&output_dir).unwrap();
-    }
-    fs::create_dir_all(&output_dir).unwrap();
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let output_dir = temp_dir.path();
 
-    let json_path = output_dir.join("ZOMBOSS_MUSIC.json");
+    // We want to extract to a subdirectory "extracted"
+    let extract_dir = output_dir.join("extracted");
 
     let status_extract = Command::new(&cli_path)
         .arg("bnk")
         .arg("unpack")
         .arg(&sample_bnk)
         .arg("--output")
-        .arg(&json_path)
+        .arg(&extract_dir)
         .current_dir(&root_dir)
         .status()
         .expect("Failed to extract BNK");
     assert!(status_extract.success(), "Failed to extract sample BNK");
 
     // 4. Repack it
-    // The extracted WEMs are in output_dir/ZOMBOSS_MUSIC
-    let wem_dir = output_dir.join("ZOMBOSS_MUSIC");
+    // The unpacked files are in extract_dir
+    // JSON is at extract_dir/bank_header.json
+    // WEMs are at extract_dir (files are directly there? No, loop in unpack_bnk joins out_dir.join(filename))
+    // unpack_bnk writes WEMs to out_dir directly.
+
+    let json_path = extract_dir.join("bank_header.json");
+
+    // Check if WEMs are in extract_dir
+    let wem_dir = extract_dir.clone();
+
     let repacked_bnk = output_dir.join("ZOMBOSS_MUSIC_REPACKED.BNK");
 
     let status_repack = Command::new(&cli_path)
@@ -271,13 +285,13 @@ fn test_repack_bnk_round_trip() {
 
     // 5. Verify Structure (Size might differ due to padding/order, but should be parsable)
     // Try to extract the repacked BNK to verify it's valid
-    let repacked_json = output_dir.join("ZOMBOSS_MUSIC_REPACKED.json");
+    let verify_dir = output_dir.join("verify");
     let status_verify = Command::new(&cli_path)
         .arg("bnk")
         .arg("unpack")
         .arg(&repacked_bnk)
         .arg("--output")
-        .arg(&repacked_json)
+        .arg(&verify_dir)
         .current_dir(&root_dir)
         .status()
         .expect("Failed to verify repacked BNK");
@@ -289,10 +303,6 @@ fn test_repack_bnk_round_trip() {
 
 #[test]
 fn test_pack_wem_round_trip() {
-    use std::fs;
-    use std::path::PathBuf;
-    use std::process::Command;
-
     // 1. Setup paths
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let root_dir = manifest_dir.parent().unwrap().parent().unwrap();
@@ -312,11 +322,47 @@ fn test_pack_wem_round_trip() {
     // 2. We need a sample WEM. Let's use one from ZOMBOSS_MUSIC if extracted,
     // or just assume one exists in test_output/final_verify/repack_test/ZOMBOSS_MUSIC
     // If not, we skip.
-    let wem_dir = final_verify_dir.join("repack_test/ZOMBOSS_MUSIC");
-    if !wem_dir.exists() {
-        println!("Skipping pack-wem test: WEM dir not found (run repack test first)");
+    // Note: We need to rely on existing extracted data OR extract it first.
+    // Since we can't rely on order of test execution, we should probably check if we can extract one.
+    // However, for now, let's assume if it exists we use it.
+    // Wait, relying on files created by OTHER tests is bad practice.
+    // But this test was pointing to `repack_test/ZOMBOSS_MUSIC` which was created by `test_repack_bnk_round_trip`!
+    // This is flaky. I should make this test self-contained or skip if not available.
+    // Let's try to extract ZOMBOSS_MUSIC to temp dir if not found?
+    // Or just look for ANY wem in final_verify?
+
+    // Let's try to find a WEM in `final_verify` itself (if unpacked previously?)
+    // No, `final_verify` structure is `obb/...`.
+
+    // Let's modify this test to check if `ZOMBOSS_MUSIC.BNK` exists, extract it to temp, then run test.
+    let sample_bnk = final_verify_dir.join("obb/ZombossGlobalAudio/SOUNDBANKS/ZOMBOSS_MUSIC.BNK");
+    if !sample_bnk.exists() {
+        println!("Skipping pack-wem test: BNK source not found");
         return;
     }
+
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let output_dir = temp_dir.path(); // Use temp dir for output
+
+    let extract_dir = output_dir.join("extracted");
+
+    // Extract BNK to get a WEM
+    let status_extract = Command::new(&cli_path)
+        .arg("bnk")
+        .arg("unpack")
+        .arg(&sample_bnk)
+        .arg("--output")
+        .arg(&extract_dir)
+        .current_dir(&root_dir)
+        .status()
+        .expect("Failed to extract BNK");
+
+    if !status_extract.success() {
+        println!("Skipping pack-wem test: Failed to extract BNK source");
+        return;
+    }
+
+    let wem_dir = extract_dir;
 
     // Find first WEM
     let mut sample_wem = None;
@@ -332,17 +378,12 @@ fn test_pack_wem_round_trip() {
     let sample_wem = match sample_wem {
         Some(p) => p,
         None => {
-            println!("Skipping pack-wem test: No WEM files found");
+            println!("Skipping pack-wem test: No WEM files found in BNK");
             return;
         }
     };
 
     println!("Testing pack-wem with {:?}", sample_wem);
-    let output_dir = final_verify_dir.join("pack_wem_test");
-    if output_dir.exists() {
-        fs::remove_dir_all(&output_dir).unwrap();
-    }
-    fs::create_dir_all(&output_dir).unwrap();
 
     // 3. WEM -> OGG
     let ogg_path = output_dir.join("temp.ogg");
@@ -398,44 +439,7 @@ fn test_pack_wem_round_trip() {
 
 #[test]
 fn test_pack_m4a_round_trip() {
-    // 1. Setup paths
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let root_dir = manifest_dir.parent().unwrap().parent().unwrap();
-    let _cli_path = root_dir.join("target/debug/pvz2-toolkit-cli");
-    let _final_verify_dir = root_dir.join("test_output/final_verify");
-
-    // Ensure CLI is build
-    let status_build = Command::new("cargo")
-        .arg("build")
-        .arg("--bin")
-        .arg("pvz2-toolkit-cli")
-        .current_dir(&root_dir)
-        .status()
-        .expect("Failed to build CLI");
-    assert!(status_build.success(), "Failed to build CLI");
-
-    // 2. We need a sample M4A.
-    // We can generate one from a BNK that has AAC (rare in main assets?), or use a dummy m4a.
-    // Or we can convert a WEM to M4A first using `convert-wem` if we find an AAC wem.
-    // Let's create a dummy M4A file (valid container is hard to fake without encoder).
-    // Better: Find an existing AAC wem in verify dir and extract it.
-
-    // Scan for any WEM in `final_verify` and check if it's AAC.
-    // This is slow.
-    // Let's assume we can just use a placeholder file for testing PACKING structure,
-    // even if content is garbage? No, `pack-wem` probes with symphonia.
-    // So we need a valid M4A.
-
-    // We don't have a guaranteed M4A sample.
-    // Let's skip if we can't find one?
-    // Or check if we have `ZOMBOSS_MUSIC` which might have AAC? (Usually Vorbis).
-    // `DINO_MUSIC`?
-
-    // Let's try to find an AAC wem in the `repack_test` output if available.
-    // If not, we skip with a message.
-
-    println!("Skipping pack-m4a test: No guaranteed M4A source available in current test data.");
-    // To properly test this, we should add a small `test.m4a` to repo or `test_data`.
+    println!("Skipping pack-m4a test: No guaranteed M4A source available.");
 }
 
 #[test]
@@ -444,12 +448,10 @@ fn test_pack_wav_round_trip() {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let root_dir = manifest_dir.parent().unwrap().parent().unwrap();
     let cli_path = root_dir.join("target/debug/pvz2-toolkit-cli");
-    let verify_dir = root_dir.join("test_output/pack_wav_test");
 
-    if verify_dir.exists() {
-        fs::remove_dir_all(&verify_dir).unwrap();
-    }
-    fs::create_dir_all(&verify_dir).unwrap();
+    // Use temp dir
+    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+    let verify_dir = temp_dir.path().to_path_buf();
 
     // Ensure CLI is build
     let status_build = Command::new("cargo")

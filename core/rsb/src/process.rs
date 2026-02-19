@@ -1,13 +1,13 @@
 // use crate::error::Result as RsbResult;
-use anyhow::Result;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use crate::Rsb;
+use crate::error::{Result, RsbError};
 use crate::types::*;
-use crate::writer::RsbWriter;
+use crate::writer::RsbWriter; // Added
 
 // use byteorder::{ReadBytesExt, WriteBytesExt};
 use rsg::types::UnpackedFile;
@@ -313,7 +313,8 @@ pub fn pack_rsb(input: &Path, output: &Path) -> Result<()> {
             }
 
             let mut cursor = Cursor::new(&mut rsg_data);
-            pack_rsg(&mut cursor, &unpacked_files_for_pack, 4, 0)?;
+            pack_rsg(&mut cursor, &unpacked_files_for_pack, 4, 0)
+                .map_err(|e| RsbError::Other(e.to_string()))?;
 
             if rsg_data.len() >= 32 {
                 packet_head_info.copy_from_slice(&rsg_data[..32]);
@@ -677,8 +678,8 @@ pub fn pack_rsg_batch(input: &Path, output: &Path) -> Result<()> {
     // Expect manifest.json inside input folder
     let manifest_path = input.join("manifest.json");
     if !manifest_path.exists() {
-        return Err(anyhow::anyhow!(
-            "manifest.json not found in input directory"
+        return Err(RsbError::Other(
+            "manifest.json not found in input directory".to_string(),
         ));
     }
 
@@ -692,7 +693,7 @@ pub fn pack_rsg_batch(input: &Path, output: &Path) -> Result<()> {
     }
 
     let mut out_file = fs::File::create(output)?;
-    pack_rsg(&mut out_file, &unpacked_files, 4, 0)?;
+    pack_rsg(&mut out_file, &unpacked_files, 4, 0).map_err(|e| RsbError::Other(e.to_string()))?;
 
     println!("Packed RSG to {:?}", output);
     Ok(())

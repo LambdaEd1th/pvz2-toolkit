@@ -1,7 +1,9 @@
-use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+
+pub mod error;
 pub mod process;
+pub use error::{LawnStringsError, Result};
 
 // --- JSON Structure ---
 

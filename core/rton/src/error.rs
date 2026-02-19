@@ -20,6 +20,9 @@ pub enum Error {
     #[error("Regex Error: {0}")]
     Regex(#[from] regex::Error),
 
+    #[error("JSON Error: {0}")]
+    Json(#[from] serde_json::Error),
+
     // === Logic Errors (Specific variants) ===
     #[error("Invalid RTON Header")]
     InvalidHeader,

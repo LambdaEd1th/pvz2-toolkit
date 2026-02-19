@@ -1,14 +1,12 @@
 use byteorder::{LittleEndian, WriteBytesExt};
 use integer_encoding::VarIntWriter;
 use serde::{Serialize, ser};
-use simple_rijndael::impls::RijndaelCbc;
-use simple_rijndael::paddings::ZeroPadding;
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::io::Write;
 
-use crate::constants::{FILE_FOOTER, FILE_HEADER, FILE_VERSION, RtonIdentifier};
 use crate::error::{Error, Result};
+use crate::types::{FILE_FOOTER, FILE_HEADER, FILE_VERSION, RtonIdentifier};
 
 // === Helper Functions for String Writing ===
 
@@ -120,20 +118,8 @@ pub fn to_writer<W: Write, T: Serialize>(
         // Recursively call to_writer with None key for inner unencrypted content
         to_writer(&mut buffer, value, None)?;
 
-        // Encrypt buffer
-        let digest = md5::compute(key_str).0;
-        let hex_string = hex::encode(digest);
-        let hex_bytes = hex_string.as_bytes();
-
-        let key = hex_bytes.to_vec();
-        let iv = hex_bytes[4..28].to_vec();
-        let block_size = 24;
-
-        let cipher = RijndaelCbc::<ZeroPadding>::new(&key, block_size)
-            .map_err(|e| Error::Message(format!("Cipher init failed: {:?}", e)))?;
-
-        let encrypted = cipher
-            .encrypt(&iv, buffer)
+        // Encrypt buffer using shared crypto module
+        let encrypted = crate::crypto::encrypt_data(&buffer, key_str)
             .map_err(|e| Error::Message(format!("Encryption failed: {:?}", e)))?;
 
         writer.write_all(&encrypted)?;
