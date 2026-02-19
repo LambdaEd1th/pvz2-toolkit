@@ -16,3 +16,4 @@ anyhow = "1.0"
 ptx = { path = "../ptx" }
 image = "0.25"
 rayon = "1.8"
+walkdir = "2.5.0"

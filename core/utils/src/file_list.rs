@@ -135,10 +135,9 @@ pub fn write_file_list<P: FileListPayload, W: Write + Seek>(
             writer.write_u24::<LE>(0)?;
 
             // Record this new state as available for future jumps
-            // State: current_parser_path + char c (and previous chars)
-            current_parser_path.push(*c);
-
+            // State: current_parser_path (before c) is the context for this sibling pointer
             active_prefixes.insert(current_parser_path.clone(), offset_pos);
+            current_parser_path.push(*c);
         }
 
         // Finish string with \0
