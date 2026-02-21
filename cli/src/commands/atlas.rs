@@ -1,5 +1,5 @@
 use anyhow::Result;
-use atlas::split_atlas;
+use atlas::{merge_atlas, split_atlas};
 use clap::Subcommand;
 use std::path::PathBuf;
 
@@ -16,6 +16,20 @@ pub enum AtlasCommand {
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
+    /// Merge individual sprites into an Atlas
+    Merge {
+        /// Input Atlas JSON file (used as layout definition)
+        json_path: PathBuf,
+        /// Input directory containing sprites (optional, defaults to json name + .sprite/media)
+        #[arg(short, long)]
+        input: Option<PathBuf>,
+        /// Output image file (optional, defaults to json name + .png)
+        #[arg(long)]
+        output_image: Option<PathBuf>,
+        /// Output updated JSON file (optional, defaults to overwriting input json)
+        #[arg(long)]
+        output_json: Option<PathBuf>,
+    },
 }
 
 pub fn handle(cmd: AtlasCommand) -> Result<()> {
@@ -28,6 +42,17 @@ pub fn handle(cmd: AtlasCommand) -> Result<()> {
             &json_path,
             image.as_deref(),
             output.as_deref(),
+        )?),
+        AtlasCommand::Merge {
+            json_path,
+            input,
+            output_image,
+            output_json,
+        } => Ok(merge_atlas(
+            &json_path,
+            input.as_deref(),
+            output_image.as_deref(),
+            output_json.as_deref(),
         )?),
     }
 }

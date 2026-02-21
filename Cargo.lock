@@ -131,6 +131,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
+ "texture_packer",
  "thiserror 1.0.69",
 ]
 
@@ -1752,6 +1753,15 @@ dependencies = [
  "once_cell",
  "rustix",
  "windows-sys",
+]
+
+[[package]]
+name = "texture_packer"
+version = "0.30.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a976e9faf26d09a951476bd85322e275ccaa61602b93d2bf796fbb6be4535097"
+dependencies = [
+ "image",
 ]
 
 [[package]]

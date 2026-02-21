@@ -3,4 +3,4 @@ pub mod process;
 pub mod types;
 
 pub use error::{AtlasError, Result};
-pub use process::split_atlas;
+pub use process::{merge_atlas, split_atlas};

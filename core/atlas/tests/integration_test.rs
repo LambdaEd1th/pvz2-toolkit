@@ -93,3 +93,107 @@ fn test_split_atlas_integration() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
+
+#[test]
+fn test_merge_atlas_integration() -> Result<(), Box<dyn std::error::Error>> {
+    let temp_dir = tempfile::tempdir()?;
+    let root = temp_dir.path();
+
+    // 1. Create a media directory with two loose sprites
+    let media_dir = root.join("test_atlas.sprite").join("media");
+    fs::create_dir_all(&media_dir)?;
+
+    let mut red_img = RgbaImage::new(50, 50);
+    for x in 0..50 {
+        for y in 0..50 {
+            red_img.put_pixel(x, y, Rgba([255, 0, 0, 255]));
+        }
+    }
+    red_img.save(media_dir.join("red_rect.png"))?;
+
+    let mut blue_img = RgbaImage::new(50, 50);
+    for x in 0..50 {
+        for y in 0..50 {
+            blue_img.put_pixel(x, y, Rgba([0, 0, 255, 255]));
+        }
+    }
+    blue_img.save(media_dir.join("blue_rect.png"))?;
+
+    // 2. Create the JSON Descriptor with ax, ay unset
+    let atlas = OfficialAtlas {
+        id: "test_atlas".to_string(),
+        parent: "sprites".to_string(),
+        res: "1200".to_string(),
+        type_: "CompositeResourceGroup".to_string(),
+        resources: vec![
+            Resource {
+                id: "red_rect".to_string(),
+                type_: Some("Image".to_string()),
+                path: Some(PathOrPaths::Single("red_rect.png".to_string())),
+                width: Some(50),
+                height: Some(50),
+                ax: None,
+                ay: None,
+                aw: None,
+                ah: None,
+                x: Some(0),
+                y: Some(0),
+                cols: None,
+                rows: None,
+                atlas: Some(true),
+            },
+            Resource {
+                id: "blue_rect".to_string(),
+                type_: Some("Image".to_string()),
+                path: Some(PathOrPaths::Single("blue_rect.png".to_string())),
+                width: Some(50),
+                height: Some(50),
+                ax: None,
+                ay: None,
+                aw: None,
+                ah: None,
+                x: Some(0),
+                y: Some(0),
+                cols: None,
+                rows: None,
+                atlas: Some(true),
+            },
+        ],
+    };
+
+    let json_path = root.join("test_atlas.json");
+    let json_str = serde_json::to_string(&atlas)?;
+    fs::write(&json_path, json_str)?;
+
+    // 3. Run Merge
+    atlas::merge_atlas(&json_path, None, None, None)?;
+
+    // 4. Verify Output
+    let out_img_path = root.join("test_atlas.png");
+    assert!(out_img_path.exists());
+
+    let out_json_path = root.join("test_atlas.json");
+    let updated_json_content = fs::read_to_string(&out_json_path)?;
+    let updated_atlas: OfficialAtlas = serde_json::from_str(&updated_json_content)?;
+
+    // Both resources should now have mapped atlas coordinates
+    for res in updated_atlas.resources {
+        assert!(res.ax.is_some(), "Atlas X coord is missing");
+        assert!(res.ay.is_some(), "Atlas Y coord is missing");
+        assert!(res.aw.is_some(), "Atlas width is missing");
+        assert!(res.ah.is_some(), "Atlas height is missing");
+        assert_eq!(res.aw.unwrap(), 50);
+        assert_eq!(res.ah.unwrap(), 50);
+    }
+
+    // Checking merged image dimensions
+    let final_img = ImageReader::open(&out_img_path)?.decode()?.to_rgba8();
+    // 50x50 packed together could be 128x64 or similar power-of-two depending on the algorithm
+    assert!(
+        final_img.width() >= 100
+            || final_img.height() >= 100
+            || (final_img.width() >= 64 && final_img.height() >= 64)
+    );
+
+    Ok(())
+}
