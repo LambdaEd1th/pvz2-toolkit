@@ -38,7 +38,7 @@ pub fn unpack_bnk(input: &Path, output: &Option<PathBuf>, no_extract: bool) -> R
             // We need to read relative to DATA chunk start
             let data_start = offset;
 
-            for (_i, entry) in bnk.data_index.iter().enumerate() {
+            for entry in bnk.data_index.iter() {
                 // Prefix _i for unused
                 let entry_offset = data_start + entry.offset as u64;
                 let entry_size = entry.size;
@@ -65,7 +65,7 @@ pub fn unpack_bnk(input: &Path, output: &Option<PathBuf>, no_extract: bool) -> R
 
 pub fn pack_bnk(json_path: &Path, wems_path: &Path, output: &Path) -> Result<()> {
     // Input is folder containing bank_header.json and wem files
-    let json_content = fs::read_to_string(json_path).map_err(|e| BnkError::Io(e))?;
+    let json_content = fs::read_to_string(json_path).map_err(BnkError::Io)?;
     let mut bnk: Bnk = serde_json::from_str(&json_content)
         .map_err(|e| BnkError::ParseError(format!("JSON parse error: {}", e)))?;
 
@@ -83,15 +83,12 @@ pub fn pack_bnk(json_path: &Path, wems_path: &Path, output: &Path) -> Result<()>
         for entry in fs::read_dir(wems_path)? {
             let entry = entry?;
             let path = entry.path();
-            if let Some(ext) = path.extension() {
-                if ext == "wem" {
-                    if let Some(stem) = path.file_stem() {
-                        if let Ok(id) = stem.to_string_lossy().parse::<u32>() {
+            if let Some(ext) = path.extension()
+                && ext == "wem"
+                    && let Some(stem) = path.file_stem()
+                        && let Ok(id) = stem.to_string_lossy().parse::<u32>() {
                             ids.push(id);
                         }
-                    }
-                }
-            }
         }
         ids.sort();
         ids
@@ -115,7 +112,7 @@ pub fn pack_bnk(json_path: &Path, wems_path: &Path, output: &Path) -> Result<()>
             });
 
             data_blob.append(&mut data);
-            data_blob.extend(std::iter::repeat(0).take(padding as usize));
+            data_blob.extend(std::iter::repeat_n(0, padding as usize));
 
             current_offset += size + padding;
         } else {

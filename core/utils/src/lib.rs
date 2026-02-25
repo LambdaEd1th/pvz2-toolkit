@@ -1,5 +1,4 @@
 use std::io::{self, Read, Seek, SeekFrom, Write};
-pub mod file_list;
 
 /// Extension trait for reading binary data similar to common patterns in the codebase
 pub trait BinReadExt: Read {

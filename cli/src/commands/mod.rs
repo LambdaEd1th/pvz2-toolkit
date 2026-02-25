@@ -6,6 +6,8 @@ pub mod pam;
 pub mod patch;
 pub mod popfx;
 pub mod ptx;
+pub mod resource;
+pub mod resources;
 pub mod rsb;
 pub mod rsg;
 pub mod rton;

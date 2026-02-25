@@ -1,3 +1,4 @@
+use crate::rsg::types::Part1Extra;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -163,6 +164,8 @@ pub struct ManifestPacketInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManifestRes {
     pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub part1_info: Option<Part1Extra>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ptx_info: Option<RsbPtxInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]

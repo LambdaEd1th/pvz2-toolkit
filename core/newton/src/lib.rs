@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 pub mod error;
 pub mod process;

@@ -1,36 +1,49 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
-use rsb::process_ptx::{ptx_decode, ptx_encode};
+use rsb::ptx::{PtxDecoder, PtxEncoder, PtxFormat};
+use std::fs;
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum PtxCommands {
-    /// Decode PTX to PNG (Batch from manifest)
+    /// Decode a PTX file into a PNG
     Decode {
-        /// Input rsb_manifest.json file
-        #[arg(short, long)]
+        /// Input PTX file path
         input: PathBuf,
-        /// Output directory (optional, defaults to input dir)
+        /// Output PNG file path (optional)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Treat RGBA8888 (Format 0) as PowerVR/iOS format (BGRA) instead of default (RGBA)
+        /// Width of the texture (required if not derivable from header/size)
         #[arg(long)]
+        width: Option<u32>,
+        /// Height of the texture (required if not derivable from header/size)
+        #[arg(long)]
+        height: Option<u32>,
+        /// Texture format ID (147, 30, etc.)
+        #[arg(short, long)]
+        format: i32,
+        /// Optional alpha size for specific sub-formats
+        #[arg(long)]
+        alpha_size: Option<i32>,
+        /// Optional alpha format override
+        #[arg(long)]
+        alpha_format: Option<i32>,
+        /// Was it encoded with PowerVR? (Flips RGB/BGR for certain ETC1 formats)
+        #[arg(long, default_value_t = false)]
         powervr: bool,
     },
-    /// Encode PNG to PTX (Batch from manifest)
+    /// Encode a PNG or compatible image into a PTX file
     Encode {
-        /// Input rsb_manifest.json file
-        #[arg(short, long)]
+        /// Input image file path
         input: PathBuf,
-        /// Output directory (optional, defaults to input dir)
+        /// Output PTX file path
+        output: PathBuf,
+        /// Target PTX Format name (e.g., Rgba8888, Etc1A8)
         #[arg(short, long)]
-        output: Option<PathBuf>,
-        /// Force PowerVR/iOS format (BGRA for Format 0)
-        #[arg(long)]
+        format: String,
+        /// Are we targeting PowerVR engines (changes element order in encoded block buffer)
+        #[arg(long, default_value_t = false)]
         powervr: bool,
-        /// Use Palette Alpha (4bpp with 16-color header) for ETC1A8 (Format 147)
-        #[arg(long)]
-        palette: bool,
     },
 }
 
@@ -39,13 +52,65 @@ pub fn handle(cmd: PtxCommands) -> Result<()> {
         PtxCommands::Decode {
             input,
             output,
+            width,
+            height,
+            format,
+            alpha_size,
+            alpha_format,
             powervr,
-        } => Ok(ptx_decode(&input, &output, powervr)?),
+        } => {
+            let data = fs::read(&input)?;
+
+            // Assume width/height needs to be passed in for flat PTX files without a container providing them
+            let w = width.ok_or_else(|| {
+                anyhow!("Width must be provided for raw PTX decoding without RSG context")
+            })?;
+            let h = height.ok_or_else(|| {
+                anyhow!("Height must be provided for raw PTX decoding without RSG context")
+            })?;
+
+            println!("Decoding PTX with Format ID: {}", format);
+            let img = PtxDecoder::decode(&data, w, h, format, alpha_size, alpha_format, powervr)?;
+
+            let out_path = output.unwrap_or_else(|| input.with_extension("png"));
+            img.save(&out_path)?;
+            println!("Decoded PTX saved to {:?}", out_path);
+            Ok(())
+        }
         PtxCommands::Encode {
             input,
             output,
+            format,
             powervr,
-            palette,
-        } => Ok(ptx_encode(&input, &output, powervr, palette)?),
+        } => {
+            let img = image::open(&input)?;
+
+            // Map string format to enum
+            let fmt = match format.to_lowercase().as_str() {
+                "rgba8888" => PtxFormat::Rgba8888,
+                "rgba4444" => PtxFormat::Rgba4444,
+                "rgba5551" => PtxFormat::Rgba5551,
+                "rgb565" => PtxFormat::Rgb565,
+                "rgba4444block" => PtxFormat::Rgba4444Block,
+                "rgba5551block" => PtxFormat::Rgba5551Block,
+                "rgb565block" => PtxFormat::Rgb565Block,
+                "etc1" => PtxFormat::Etc1,
+                "etc1a8" => PtxFormat::Etc1A8,
+                "etc1palette" => PtxFormat::Etc1Palette,
+                "pvrtc4bpp" => PtxFormat::Pvrtc4BppRgba,
+                _ => {
+                    return Err(anyhow!(
+                        "Unknown or unsupported PTX format string: {}",
+                        format
+                    ));
+                }
+            };
+
+            println!("Encoding Image as {:?}", fmt);
+            let ptx_data = PtxEncoder::encode(&img, fmt, powervr)?;
+            fs::write(&output, ptx_data)?;
+            println!("Encoded PTX saved to {:?}", output);
+            Ok(())
+        }
     }
 }

@@ -1,5 +1,5 @@
-use crate::color::{ColorRGBA, Rgba32};
 use crate::error::{Result, RsbError};
+use crate::ptx::color::{ColorRGBA, Rgba32};
 use image::{DynamicImage, GenericImage, GenericImageView, ImageBuffer};
 
 const MORTON_TABLE: [i32; 256] = [
@@ -296,7 +296,7 @@ pub fn decode_pvrtc_4bpp_a8(
 
     for y in 0..height {
         for x in 0..width {
-            let mut p = img.get_pixel(x, y).clone();
+            let mut p = img.get_pixel(x, y);
             let a = data_alpha[(y * width + x) as usize];
             p[3] = a;
             img.put_pixel(x, y, p);

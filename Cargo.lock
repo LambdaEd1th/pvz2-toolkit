@@ -92,6 +92,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61"
 
 [[package]]
+name = "apng"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0a79142fc4e25db11e703bf09431aad1488d65d2e1bb4d0f664a8f8af000054c"
+dependencies = [
+ "byteorder",
+ "flate2",
+ "image 0.24.9",
+ "png 0.17.16",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "arbitrary"
 version = "1.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -127,7 +140,7 @@ dependencies = [
 name = "atlas"
 version = "0.1.0"
 dependencies = [
- "image",
+ "image 0.25.9",
  "serde",
  "serde_json",
  "tempfile",
@@ -645,6 +658,19 @@ checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "image"
+version = "0.24.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5690139d2f55868e080017335e4b94cb7414274c74f1669c84fb5feba2c9f69d"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "color_quant",
+ "num-traits",
+ "png 0.17.16",
+]
+
+[[package]]
+name = "image"
 version = "0.25.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6506c6c10786659413faa717ceebcb8f70731c0a60cbae39795fdf114519c1a"
@@ -657,7 +683,7 @@ dependencies = [
  "image-webp",
  "moxcms",
  "num-traits",
- "png",
+ "png 0.18.0",
  "qoi",
  "ravif",
  "rayon",
@@ -1035,8 +1061,11 @@ name = "pam"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "apng",
  "bitflags 2.10.0",
  "byteorder",
+ "image 0.25.9",
+ "rayon",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
@@ -1061,6 +1090,19 @@ dependencies = [
  "byteorder",
  "oxidelta",
  "thiserror 1.0.69",
+]
+
+[[package]]
+name = "png"
+version = "0.17.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "82151a2fc869e011c153adc57cf2789ccb8d9906ce52c0b39a6b5697749d7526"
+dependencies = [
+ "bitflags 1.3.2",
+ "crc32fast",
+ "fdeflate",
+ "flate2",
+ "miniz_oxide",
 ]
 
 [[package]]
@@ -1148,16 +1190,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ptx"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "byteorder",
- "image",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "pvz2-toolkit-cli"
 version = "0.1.0"
 dependencies = [
@@ -1166,17 +1198,17 @@ dependencies = [
  "bnk",
  "byteorder",
  "clap",
- "image",
+ "image 0.25.9",
  "lawnstrings",
  "md-5",
  "newton",
  "pam",
  "patch",
  "popfx",
- "ptx",
  "rayon",
+ "resource",
+ "resources",
  "rsb",
- "rsg",
  "rton",
  "serde",
  "serde-xml-rs",
@@ -1353,6 +1385,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
+name = "resource"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rsb",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "resources"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "rgb"
 version = "0.8.52"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1363,28 +1415,17 @@ name = "rsb"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bytemuck",
  "byteorder",
  "encoding_rs",
- "image",
- "ptx",
+ "flate2",
+ "image 0.25.9",
  "rayon",
- "rsg",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
  "utils",
  "walkdir",
-]
-
-[[package]]
-name = "rsg"
-version = "0.1.0"
-dependencies = [
- "byteorder",
- "flate2",
- "serde",
- "thiserror 1.0.69",
- "utils",
 ]
 
 [[package]]
@@ -1761,7 +1802,7 @@ version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a976e9faf26d09a951476bd85322e275ccaa61602b93d2bf796fbb6be4535097"
 dependencies = [
- "image",
+ "image 0.25.9",
 ]
 
 [[package]]

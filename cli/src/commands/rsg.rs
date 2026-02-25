@@ -1,26 +1,23 @@
 use anyhow::Result;
 use clap::Subcommand;
-use rsb::process::{pack_rsg_batch, unpack_rsg_batch};
+use rsb::{pack_rsg_batch, unpack_rsg_batch};
 use std::path::PathBuf;
 
 #[derive(Subcommand)]
 pub enum RsgCommands {
-    /// Unpack RSG packets from rsb_manifest.json (or single RSG file)
+    /// Unpack an RSG file or a directory of RSG files (via manifest)
     Unpack {
-        /// Input rsb_manifest.json or .rsa/rsg file
-        #[arg(short, long)]
+        /// Input RSG file or rsb_manifest.json
         input: PathBuf,
-        /// Output directory
+        /// Output directory (optional)
         #[arg(short, long)]
         output: Option<PathBuf>,
     },
-    /// Pack RSG packet from folder/config
+    /// Pack a directory of files into an RSG file (or multiple RSG files via manifest)
     Pack {
-        /// Input directory or config
-        #[arg(short, long)]
+        /// Input directory containing manifest.json or raw files
         input: PathBuf,
-        /// Output RSG file
-        #[arg(short, long)]
+        /// Output RSG file path
         output: PathBuf,
     },
 }

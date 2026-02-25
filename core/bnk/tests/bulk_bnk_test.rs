@@ -70,11 +70,10 @@ fn collect_files(dir: &Path, extension: &str, results: &mut Vec<PathBuf>) {
             let path = entry.path();
             if path.is_dir() {
                 collect_files(&path, extension, results);
-            } else if let Some(ext) = path.extension() {
-                if ext.to_string_lossy().eq_ignore_ascii_case(extension) {
+            } else if let Some(ext) = path.extension()
+                && ext.to_string_lossy().eq_ignore_ascii_case(extension) {
                     results.push(path);
                 }
-            }
         }
     }
 }

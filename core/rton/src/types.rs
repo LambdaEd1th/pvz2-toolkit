@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use crate::binary::BinaryBlob;
 use crate::error::Error;
 use crate::varint::VarInt;

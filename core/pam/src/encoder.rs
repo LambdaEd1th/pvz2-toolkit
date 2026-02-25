@@ -100,8 +100,10 @@ fn write_image_info<W: Write>(img: &ImageInfo, writer: &mut W, version: i32) -> 
         let get = |i| {
             if i < t.len() {
                 t[i]
+            } else if i % 4 == 0 || i % 4 == 3 {
+                1.0
             } else {
-                if i % 4 == 0 || i % 4 == 3 { 1.0 } else { 0.0 }
+                0.0
             }
         };
 
@@ -352,7 +354,7 @@ fn write_moves_info<W: Write>(info: &MovesInfo, writer: &mut W, _version: i32) -
     } else {
         0.0
     };
-    let ty = if info.transform.len() >= 1 {
+    let ty = if !info.transform.is_empty() {
         info.transform[info.transform.len() - 1]
     } else {
         0.0

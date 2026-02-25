@@ -1,6 +1,6 @@
+use crate::file_list::FileListPayload;
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
-use shared_utils::file_list::FileListPayload;
 use std::io::{Read, Write};
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]

@@ -51,3 +51,34 @@ pub fn pam_encode(input: &Path, output: &Option<PathBuf>) -> Result<()> {
     println!("Encoded PAM to {:?}", out_path);
     Ok(())
 }
+
+pub fn pam_render(
+    input: &Path,
+    media: &Path,
+    output: &Path,
+    disable: Vec<i32>,
+    format_str: &str,
+) -> Result<()> {
+    let content = fs::read_to_string(input).context("Failed to read input PAM JSON")?;
+    let pam_info: crate::types::PamInfo =
+        serde_json::from_str(&content).context("Failed to parse JSON")?;
+
+    let format = match format_str.to_lowercase().as_str() {
+        "png" => crate::render::RenderFormat::PngSequence,
+        "gif" => crate::render::RenderFormat::Gif,
+        _ => anyhow::bail!(
+            "Unsupported format: {}. Valid formats: png, gif",
+            format_str
+        ),
+    };
+
+    let setting = crate::render::AnimationHelperSetting {
+        disable_sprite: disable,
+        format,
+        ..Default::default()
+    };
+
+    crate::render::render_animation(&pam_info, output, media, &setting)?;
+    println!("Rendered PAM animation to {:?}", output);
+    Ok(())
+}

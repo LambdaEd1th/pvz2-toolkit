@@ -420,37 +420,37 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         converter.parse_vorb_chunk(force_packet_format)?;
 
         // Recalculate samples if prefetch
-        if converter.prefetch {
-            if let Some(_data) = converter.chunks.data {
-                // Ratio of available data vs expected data
-                // Expected data size is stored in the chunk_size we likely originally read,
-                // but we clamped it in read_chunks.
-                // We need to read the original size again or store it.
-                // Actually read_chunks already clamped it.
-                // Let's assume the original size was roughly intended to be cover the full samples.
-                // But wait, we don't know the original data chunk size because we clamped it!
-                // We should probably rely on `offset + size > file_size` check again?
-                // No, we modify `read_chunks` to clamp but we lost the original value.
-                // However, we can use `sample_count` and the known average bytes per sample? No Vorbis is VBR.
+        if converter.prefetch
+            && let Some(_data) = converter.chunks.data
+        {
+            // Ratio of available data vs expected data
+            // Expected data size is stored in the chunk_size we likely originally read,
+            // but we clamped it in read_chunks.
+            // We need to read the original size again or store it.
+            // Actually read_chunks already clamped it.
+            // Let's assume the original size was roughly intended to be cover the full samples.
+            // But wait, we don't know the original data chunk size because we clamped it!
+            // We should probably rely on `offset + size > file_size` check again?
+            // No, we modify `read_chunks` to clamp but we lost the original value.
+            // However, we can use `sample_count` and the known average bytes per sample? No Vorbis is VBR.
 
-                // Let's seek back to data chunk header to read original size?
-                // Or we could have stored `original_data_size` in the struct.
-                // For now, let's just use what vgmstream does:
-                // "ww.data_size = ww.file_size - ww.data_offset;" (Clamped size)
-                // "vgmstream->num_samples = ... * (file_size - start) / (original_data_size)"
-                // We need original data size.
+            // Let's seek back to data chunk header to read original size?
+            // Or we could have stored `original_data_size` in the struct.
+            // For now, let's just use what vgmstream does:
+            // "ww.data_size = ww.file_size - ww.data_offset;" (Clamped size)
+            // "vgmstream->num_samples = ... * (file_size - start) / (original_data_size)"
+            // We need original data size.
 
-                // Re-read data chunk size
-                if let Some(data_loc) = converter.chunks.data {
-                    converter.input.seek(SeekFrom::Start(data_loc.offset - 4))?;
-                    let original_size = converter.read_u32()? as u64;
+            // Re-read data chunk size
+            if let Some(data_loc) = converter.chunks.data {
+                converter.input.seek(SeekFrom::Start(data_loc.offset - 4))?;
+                let original_size = converter.read_u32()? as u64;
 
-                    if original_size > 0 {
-                        let avail_size = data_loc.size; // This is clamped
-                        // Avoiding float, use u64
-                        converter.sample_count =
-                            ((converter.sample_count as u64 * avail_size) / original_size) as u32;
-                    }
+                if original_size > 0 {
+                    let avail_size = data_loc.size; // This is clamped
+                    // Avoiding float, use u64
+                    converter.sample_count =
+                        ((converter.sample_count as u64 * avail_size) / original_size) as u32;
                 }
             }
         }
@@ -536,11 +536,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
                     if data_offset + chunk_size > self.file_size {
                         self.prefetch = true;
                         // Clamp size to what's available
-                        let avail = if data_offset < self.file_size {
-                            self.file_size - data_offset
-                        } else {
-                            0
-                        };
+                        let avail = self.file_size.saturating_sub(data_offset);
                         self.chunks.data = Some(ChunkLocation::new(data_offset, avail));
                     } else {
                         self.chunks.data = Some(ChunkLocation::new(data_offset, chunk_size));

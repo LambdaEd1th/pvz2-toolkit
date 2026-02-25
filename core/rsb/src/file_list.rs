@@ -1,3 +1,4 @@
+#![allow(clippy::needless_question_mark)]
 use byteorder::{ReadBytesExt, WriteBytesExt, LE};
 use std::collections::HashMap;
 use std::io::{Read, Result, Seek, SeekFrom, Write};

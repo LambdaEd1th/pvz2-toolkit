@@ -22,6 +22,5 @@ target/
 **/.DS_Store
 
 # Project specific
-test_output/
-test_data/
+*test*/
 *.log

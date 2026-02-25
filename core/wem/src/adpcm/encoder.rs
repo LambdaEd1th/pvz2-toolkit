@@ -41,7 +41,7 @@ impl WavToAdpcm {
         // Blocks of 64 samples = 36 bytes per channel.
         let samples_per_block = 64;
         let block_size_per_channel = 36;
-        let num_blocks = (len + samples_per_block - 1) / samples_per_block;
+        let num_blocks = len.div_ceil(samples_per_block);
         let data_size = num_blocks * block_size_per_channel as u32 * channels as u32;
 
         Ok(Self {
@@ -207,8 +207,7 @@ fn encode_block(samples: &[i16], state: &mut AdpcmState) -> Vec<u8> {
 
     let mut bit_buffer = 0u8;
 
-    for i in 1..64 {
-        let sample = samples[i];
+    for (i, &sample) in samples.iter().take(64).enumerate().skip(1) {
         let _diff = sample as i32 - state.predictor;
         let step = IMA_STEP_TABLE[state.step_index as usize];
 
@@ -224,7 +223,7 @@ fn encode_block(samples: &[i16], state: &mut AdpcmState) -> Vec<u8> {
 
         // Brute force 16 nibbles? It's fast enough.
         for nibble in 0..16 {
-            let mut delta = (nibble & 0x7) as i32;
+            let mut delta = nibble & 0x7;
             delta = ((delta * 2 + 1) * step) >> 3;
             if (nibble & 8) != 0 {
                 delta = -delta;
@@ -242,7 +241,7 @@ fn encode_block(samples: &[i16], state: &mut AdpcmState) -> Vec<u8> {
 
         // Apply best nibble to update state
         let nibble = best_nibble;
-        let mut delta = (nibble & 0x7) as i32;
+        let mut delta = nibble & 0x7;
         delta = ((delta * 2 + 1) * step) >> 3;
         if (nibble & 8) != 0 {
             delta = -delta;

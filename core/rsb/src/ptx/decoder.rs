@@ -1,7 +1,7 @@
-use crate::codec::etc1::{decode_etc1, decode_etc1_a8, decode_palette_alpha};
-use crate::codec::pvrtc::{decode_pvrtc_4bpp, decode_pvrtc_4bpp_a8};
 use crate::error::{Result, RsbError};
-use crate::types::PtxFormat;
+use crate::ptx::codec::etc1::{decode_etc1, decode_etc1_a8, decode_palette_alpha};
+use crate::ptx::codec::pvrtc::{decode_pvrtc_4bpp, decode_pvrtc_4bpp_a8};
+use crate::ptx::types::PtxFormat;
 use image::{DynamicImage, ImageBuffer, Rgba};
 
 pub struct PtxDecoder;
@@ -149,8 +149,8 @@ impl PtxDecoder {
                 let block_h = 32;
 
                 let mut img_buf = ImageBuffer::new(width, height);
-                let blocks_x = (width + block_w - 1) / block_w;
-                let blocks_y = (height + block_h - 1) / block_h;
+                let blocks_x = width.div_ceil(block_w);
+                let blocks_y = height.div_ceil(block_h);
 
                 let mut offset = 0;
 
@@ -161,8 +161,8 @@ impl PtxDecoder {
                                 let x = bx * block_w + x_local;
                                 let y = by * block_h + y_local;
 
-                                if x < width && y < height {
-                                    if offset + 2 <= data.len() {
+                                if x < width && y < height
+                                    && offset + 2 <= data.len() {
                                         let val =
                                             u16::from_le_bytes([data[offset], data[offset + 1]]);
                                         let r = ((val & 0xF000) >> 12) as u8;
@@ -177,7 +177,6 @@ impl PtxDecoder {
 
                                         img_buf.put_pixel(x, y, Rgba([r8, g8, b8, a8]));
                                     }
-                                }
                                 offset += 2;
                             }
                         }
@@ -190,8 +189,8 @@ impl PtxDecoder {
                 let block_h = 32;
 
                 let mut img_buf = ImageBuffer::new(width, height);
-                let blocks_x = (width + block_w - 1) / block_w;
-                let blocks_y = (height + block_h - 1) / block_h;
+                let blocks_x = width.div_ceil(block_w);
+                let blocks_y = height.div_ceil(block_h);
 
                 let mut offset = 0;
 
@@ -202,8 +201,8 @@ impl PtxDecoder {
                                 let x = bx * block_w + x_local;
                                 let y = by * block_h + y_local;
 
-                                if x < width && y < height {
-                                    if offset + 2 <= data.len() {
+                                if x < width && y < height
+                                    && offset + 2 <= data.len() {
                                         let val =
                                             u16::from_le_bytes([data[offset], data[offset + 1]]);
                                         let r = ((val & 0xF800) >> 11) as u8;
@@ -216,7 +215,6 @@ impl PtxDecoder {
 
                                         img_buf.put_pixel(x, y, Rgba([r8, g8, b8, 255]));
                                     }
-                                }
                                 offset += 2;
                             }
                         }
@@ -229,8 +227,8 @@ impl PtxDecoder {
                 let block_h = 32;
 
                 let mut img_buf = ImageBuffer::new(width, height);
-                let blocks_x = (width + block_w - 1) / block_w;
-                let blocks_y = (height + block_h - 1) / block_h;
+                let blocks_x = width.div_ceil(block_w);
+                let blocks_y = height.div_ceil(block_h);
 
                 let mut offset = 0;
 
@@ -241,8 +239,8 @@ impl PtxDecoder {
                                 let x = bx * block_w + x_local;
                                 let y = by * block_h + y_local;
 
-                                if x < width && y < height {
-                                    if offset + 2 <= data.len() {
+                                if x < width && y < height
+                                    && offset + 2 <= data.len() {
                                         let val =
                                             u16::from_le_bytes([data[offset], data[offset + 1]]);
                                         let r = ((val & 0xF800) >> 11) as u8;
@@ -257,7 +255,6 @@ impl PtxDecoder {
 
                                         img_buf.put_pixel(x, y, Rgba([r8, g8, b8, a8]));
                                     }
-                                }
                                 offset += 2;
                             }
                         }

@@ -12,7 +12,7 @@ pub fn smf_unpack(input: &Path, output: &Option<PathBuf>, use_64bit: bool) -> Re
     let out_path = match output {
         Some(p) => p.clone(),
         None => {
-            if input.extension().map_or(false, |e| e == "smf") {
+            if input.extension().is_some_and(|e| e == "smf") {
                 input.with_extension("")
             } else {
                 input.with_extension("decoded")

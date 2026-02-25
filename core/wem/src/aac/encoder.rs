@@ -1,3 +1,4 @@
+#![allow(clippy::collapsible_if)]
 use crate::error::{WemError, WemResult};
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::fs::File;
@@ -56,7 +57,7 @@ pub struct M4aToWem<R: Read + Seek> {
 impl<R: Read + Seek + Send + Sync + 'static> M4aToWem<R> {
     pub fn new(mut input: R) -> WemResult<Self> {
         // Probe metadata using symphonia
-        let stream_len = input.seek(SeekFrom::End(0))? as u64;
+        let stream_len = input.seek(SeekFrom::End(0))?;
         input.seek(SeekFrom::Start(0))?;
 
         // Clone input for probing (since symphonia consumes it or takes ownership of box)
@@ -167,7 +168,7 @@ impl<R: Read + Seek + Send + Sync + 'static> M4aToWem<R> {
                                 8 + self.data_size; // data
 
         writer.write_all(b"RIFF")?;
-        writer.write_u32::<LittleEndian>(riff_payload_size as u32)?;
+        writer.write_u32::<LittleEndian>(riff_payload_size)?;
         writer.write_all(b"WAVE")?;
 
         // fmt chunk

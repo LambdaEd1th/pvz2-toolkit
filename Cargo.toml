@@ -1,13 +1,11 @@
 [workspace]
 members = [
-    "core/ptx",
     "core/pam",
     "core/lawnstrings",
     "cli",
     "core/rton",
     "core/newton",
     "core/rsb",
-    "core/rsg",
     "core/popfx",
     "core/bnk",
     "core/wem",
@@ -15,6 +13,7 @@ members = [
     "core/smf",
     "core/atlas",
     "core/utils",
+    "core/resources", "core/resource",
 ]
 resolver = "2"
 

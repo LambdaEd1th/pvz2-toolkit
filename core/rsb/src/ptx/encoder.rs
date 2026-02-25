@@ -1,13 +1,13 @@
-use crate::codec::etc1::{encode_etc1_block, encode_palette_alpha};
-use crate::color::Rgba32;
 use crate::error::{Result, RsbError};
-use crate::types::PtxFormat;
+use crate::ptx::codec::etc1::{encode_etc1_block, encode_palette_alpha};
+use crate::ptx::color::Rgba32;
+use crate::ptx::types::PtxFormat;
 use image::{DynamicImage, GenericImageView};
 
 pub struct PtxEncoder;
 
 impl PtxEncoder {
-    pub fn encode(image: &DynamicImage, format: PtxFormat) -> Result<Vec<u8>> {
+    pub fn encode(image: &DynamicImage, format: PtxFormat, is_powervr: bool) -> Result<Vec<u8>> {
         let width = image.width();
         let height = image.height();
 
@@ -18,10 +18,17 @@ impl PtxEncoder {
                 for y in 0..height {
                     for x in 0..width {
                         let p = image.get_pixel(x, y);
-                        data.push(p[0]);
-                        data.push(p[1]);
-                        data.push(p[2]);
-                        data.push(p[3]);
+                        if is_powervr {
+                            data.push(p[2]); // B
+                            data.push(p[1]); // G
+                            data.push(p[0]); // R
+                            data.push(p[3]); // A
+                        } else {
+                            data.push(p[0]); // R
+                            data.push(p[1]); // G
+                            data.push(p[2]); // B
+                            data.push(p[3]); // A
+                        }
                     }
                 }
                 Ok(data)
@@ -88,8 +95,8 @@ impl PtxEncoder {
                 // Tiled 32x32 blocks
                 let block_w = 32;
                 let block_h = 32;
-                let blocks_x = (width + block_w - 1) / block_w;
-                let blocks_y = (height + block_h - 1) / block_h;
+                let blocks_x = width.div_ceil(block_w);
+                let blocks_y = height.div_ceil(block_h);
 
                 let mut data = Vec::with_capacity((width * height * 2) as usize);
 
@@ -121,8 +128,8 @@ impl PtxEncoder {
             PtxFormat::Rgb565Block => {
                 let block_w = 32;
                 let block_h = 32;
-                let blocks_x = (width + block_w - 1) / block_w;
-                let blocks_y = (height + block_h - 1) / block_h;
+                let blocks_x = width.div_ceil(block_w);
+                let blocks_y = height.div_ceil(block_h);
 
                 let mut data = Vec::with_capacity((width * height * 2) as usize);
 
@@ -152,8 +159,8 @@ impl PtxEncoder {
             PtxFormat::Rgba5551Block => {
                 let block_w = 32;
                 let block_h = 32;
-                let blocks_x = (width + block_w - 1) / block_w;
-                let blocks_y = (height + block_h - 1) / block_h;
+                let blocks_x = width.div_ceil(block_w);
+                let blocks_y = height.div_ceil(block_h);
 
                 let mut data = Vec::with_capacity((width * height * 2) as usize);
 
@@ -185,8 +192,8 @@ impl PtxEncoder {
                 // Encode standard ETC1 (Opaque)
                 // Need 4x4 blocks
                 let mut data = Vec::new();
-                let blocks_x = (width + 3) / 4;
-                let blocks_y = (height + 3) / 4;
+                let blocks_x = width.div_ceil(4);
+                let blocks_y = height.div_ceil(4);
 
                 for by in 0..blocks_y {
                     for bx in 0..blocks_x {
@@ -216,8 +223,8 @@ impl PtxEncoder {
                 // Encode as ETC1 + Uncompressed Alpha (Legacy/Standard)
                 // Pass 1: RGB (ETC1)
                 let mut data = Vec::new();
-                let blocks_x = (width + 3) / 4;
-                let blocks_y = (height + 3) / 4;
+                let blocks_x = width.div_ceil(4);
+                let blocks_y = height.div_ceil(4);
 
                 for by in 0..blocks_y {
                     for bx in 0..blocks_x {

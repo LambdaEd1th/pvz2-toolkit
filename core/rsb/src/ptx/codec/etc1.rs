@@ -1,4 +1,4 @@
-use crate::color::Rgba32;
+use crate::ptx::color::Rgba32;
 
 pub const ETC1_MODIFIERS: [[i32; 2]; 8] = [
     [2, 8],
@@ -187,7 +187,7 @@ pub fn decode_etc1_a8(
         // Combine: use alpha_img's green channel as alpha
         for y in 0..height {
             for x in 0..width {
-                let mut p_color = img.get_pixel(x, y).clone();
+                let mut p_color = img.get_pixel(x, y);
                 let p_alpha = alpha_img.get_pixel(x, y);
                 // Assuming ETC1 encoding of grayscale places value in G (and R, B)
                 p_color[3] = p_alpha[1];
@@ -204,7 +204,7 @@ pub fn decode_etc1_a8(
 
         for y in 0..height {
             for x in 0..width {
-                let mut p_color = img.get_pixel(x, y).clone();
+                let mut p_color = img.get_pixel(x, y);
                 let a = data_alpha[(y * width + x) as usize];
                 p_color[3] = a;
                 img.put_pixel(x, y, p_color);
@@ -245,13 +245,13 @@ pub fn decode_palette_alpha(data: &[u8], width: u32, height: u32) -> Result<Dyna
     // Let's rename the helper to `decode_palette_alpha_values` and call it.
 
     let alphas = decode_palette_alpha_values(alpha_data, (width * height) as usize)
-        .map_err(|e| RsbError::DeserializationError(e))?;
+        .map_err(RsbError::DeserializationError)?;
 
     for y in 0..height {
         for x in 0..width {
             let idx = (y * width + x) as usize;
             if idx < alphas.len() {
-                let mut p = img.get_pixel(x, y).clone();
+                let mut p = img.get_pixel(x, y);
                 p[3] = alphas[idx];
                 img.put_pixel(x, y, p);
             }
@@ -648,8 +648,8 @@ pub fn encode_palette_alpha(image: &DynamicImage) -> Result<Vec<u8>> {
     let mut data = Vec::new(); // Final data
 
     // --- ETC1 Encode ---
-    let blocks_x = (width + 3) / 4;
-    let blocks_y = (height + 3) / 4;
+    let blocks_x = width.div_ceil(4);
+    let blocks_y = height.div_ceil(4);
 
     // RGB Data
     for by in 0..blocks_y {

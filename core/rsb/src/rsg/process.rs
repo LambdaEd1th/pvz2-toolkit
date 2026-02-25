@@ -1,10 +1,10 @@
-use crate::error::{Result, RsgError};
-use crate::types::{Part0Info, Part1Extra, Part1Info, RsgPayload, UnpackedFile};
+use crate::error::{Result, RsbError};
+use crate::file_list::read_file_list;
+use crate::rsg::types::{Part0Info, Part1Extra, Part1Info, RsgPayload, UnpackedFile};
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use flate2::Compression;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
-use shared_utils::file_list::read_file_list;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 pub fn unpack_rsg(reader: &mut (impl Read + Seek)) -> Result<Vec<UnpackedFile>> {
@@ -14,7 +14,7 @@ pub fn unpack_rsg(reader: &mut (impl Read + Seek)) -> Result<Vec<UnpackedFile>> 
     let mut magic = [0u8; 4];
     reader.read_exact(&mut magic)?;
     if &magic != b"pgsr" {
-        return Err(RsgError::InvalidMagic(
+        return Err(RsbError::InvalidMagic(
             "pgsr".to_string(),
             String::from_utf8_lossy(&magic).to_string(),
         ));
@@ -22,7 +22,7 @@ pub fn unpack_rsg(reader: &mut (impl Read + Seek)) -> Result<Vec<UnpackedFile>> 
 
     let version = reader.read_u32::<LE>()?;
     if version != 3 && version != 4 {
-        return Err(RsgError::InvalidVersion(version));
+        return Err(RsbError::InvalidVersion(version));
     }
     reader.read_u64::<LE>()?; // Skip 8 bytes
 
@@ -163,7 +163,7 @@ pub fn pack_rsg<W: Write + Seek>(
     for (i, file) in files.iter().enumerate() {
         let payload = if file.is_part1 {
             let (off, sz) = part1_lookup[&i];
-            let info = file.part1_info.as_ref().ok_or(RsgError::InvalidMagic(
+            let info = file.part1_info.as_ref().ok_or(RsbError::InvalidMagic(
                 "Missing Part1 Info".into(),
                 "".into(),
             ))?;
@@ -195,7 +195,7 @@ pub fn pack_rsg<W: Write + Seek>(
     let file_list_offset = (writer.stream_position()? - start_pos) as u32;
 
     let file_list_begin = writer.stream_position()?;
-    use shared_utils::file_list::write_file_list;
+    use crate::file_list::write_file_list;
     write_file_list(writer, file_list_begin, &file_list_entries)?;
     let file_list_end = writer.stream_position()?;
     let file_list_len = (file_list_end - file_list_begin) as u32;
@@ -318,7 +318,7 @@ fn read_packet_data(
     if actually_zlib {
         let mut d = ZlibDecoder::new(&raw_data[..]);
         let mut out = Vec::new(); // should reserve size?
-        d.read_to_end(&mut out).map_err(|_| RsgError::Zlib)?;
+        d.read_to_end(&mut out).map_err(|_| RsbError::Zlib)?;
         Ok(out)
     } else {
         // If size != z_size, and not zlib, what is it?

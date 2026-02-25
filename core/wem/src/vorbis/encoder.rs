@@ -45,7 +45,7 @@ impl<R: Read + Seek> OggToWem<R> {
         while let Some(p) = self
             .input
             .read_packet()
-            .map_err(|e| WemError::parse(&format!("Ogg error: {:?}", e)))?
+            .map_err(|e| WemError::parse(format!("Ogg error: {:?}", e)))?
         {
             vorbis_packets.push(p);
         }
@@ -92,8 +92,7 @@ impl<R: Read + Seek> OggToWem<R> {
         self.first_audio_packet_offset = data_cursor.position() as u32;
 
         let mut last_granule = 0;
-        for i in 3..vorbis_packets.len() {
-            let p = &vorbis_packets[i];
+        for p in vorbis_packets.iter().skip(3) {
             self.write_packet(&mut data_cursor, p, false)?;
             last_granule = p.absgp_page();
         }
@@ -126,7 +125,7 @@ impl<R: Read + Seek> OggToWem<R> {
                                 8 + vorb_chunk_size + // vorb
                                 8 + self.data_size; // data
 
-        writer.write_u32::<LittleEndian>(riff_payload_size as u32)?;
+        writer.write_u32::<LittleEndian>(riff_payload_size)?;
         writer.write_all(b"WAVE")?;
 
         // fmt chunk
@@ -144,7 +143,7 @@ impl<R: Read + Seek> OggToWem<R> {
 
         // vorb chunk
         writer.write_all(b"vorb")?;
-        writer.write_u32::<LittleEndian>(vorb_chunk_size as u32)?;
+        writer.write_u32::<LittleEndian>(vorb_chunk_size)?;
         writer.write_u32::<LittleEndian>(self.total_samples)?;
 
         writer.write_u32::<LittleEndian>(0)?;

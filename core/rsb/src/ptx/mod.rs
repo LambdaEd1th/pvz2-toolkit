@@ -2,13 +2,10 @@ pub mod codec;
 pub mod color;
 pub mod decoder;
 pub mod encoder;
-pub mod error;
-pub mod process;
 pub mod types;
 
 pub use decoder::PtxDecoder;
 pub use encoder::PtxEncoder;
-pub use process::{decode_ptx, encode_ptx};
 pub use types::PtxFormat;
 
 #[cfg(test)]
@@ -22,11 +19,11 @@ mod tests {
         let width = 64;
         let height = 64;
         let img = DynamicImage::new_rgba8(width, height);
-        let encoded = encode_ptx(&img, PtxFormat::Rgba8888).unwrap();
+        let encoded = PtxEncoder::encode(&img, PtxFormat::Rgba8888, false).unwrap();
         assert_eq!(encoded.len(), (width * height * 4) as usize);
 
         // Decode check
-        let decoded = decode_ptx(&encoded, width, height, 0, None, None, false).unwrap();
+        let decoded = PtxDecoder::decode(&encoded, width, height, 0, None, None, false).unwrap();
         assert_eq!(decoded.width(), width);
     }
 
@@ -70,43 +67,43 @@ mod tests {
         let img = DynamicImage::new_rgba8(width, height);
 
         // Rgba8888: 4 bytes per pixel
-        let data = PtxEncoder::encode(&img, PtxFormat::Rgba8888).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba8888, false).unwrap();
         assert_eq!(data.len(), (width * height * 4) as usize);
 
         // Rgba4444: 2 bytes per pixel
-        let data = PtxEncoder::encode(&img, PtxFormat::Rgba4444).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba4444, false).unwrap();
         assert_eq!(data.len(), (width * height * 2) as usize);
 
         // Rgb565: 2 bytes per pixel
-        let data = PtxEncoder::encode(&img, PtxFormat::Rgb565).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgb565, false).unwrap();
         assert_eq!(data.len(), (width * height * 2) as usize);
 
         // Rgba5551: 2 bytes per pixel
-        let data = PtxEncoder::encode(&img, PtxFormat::Rgba5551).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba5551, false).unwrap();
         assert_eq!(data.len(), (width * height * 2) as usize);
 
         // Rgba4444Block: 2 bytes per pixel (no padding needed for 64x64)
-        let data = PtxEncoder::encode(&img, PtxFormat::Rgba4444Block).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba4444Block, false).unwrap();
         assert_eq!(data.len(), (width * height * 2) as usize);
 
         // Rgb565Block: 2 bytes per pixel
-        let data = PtxEncoder::encode(&img, PtxFormat::Rgb565Block).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgb565Block, false).unwrap();
         assert_eq!(data.len(), (width * height * 2) as usize);
 
         // Rgba5551Block: 2 bytes per pixel
-        let data = PtxEncoder::encode(&img, PtxFormat::Rgba5551Block).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Rgba5551Block, false).unwrap();
         assert_eq!(data.len(), (width * height * 2) as usize);
 
         // Etc1: 0.5 bytes per pixel (4x4 block = 8 bytes)
-        let data = PtxEncoder::encode(&img, PtxFormat::Etc1).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Etc1, false).unwrap();
         assert_eq!(data.len(), (width * height / 2) as usize);
 
         // Etc1A8: Etc1 + 1 byte per pixel alpha
-        let data = PtxEncoder::encode(&img, PtxFormat::Etc1A8).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Etc1A8, false).unwrap();
         assert_eq!(data.len(), (width * height / 2 + width * height) as usize);
 
         // Etc1Palette: Etc1 + 1 header + 16 palette + 0.5 bytes per pixel alpha
-        let data = PtxEncoder::encode(&img, PtxFormat::Etc1Palette).unwrap();
+        let data = PtxEncoder::encode(&img, PtxFormat::Etc1Palette, false).unwrap();
         let expected = (width * height / 2) + 1 + 16 + (width * height / 2);
         assert_eq!(data.len(), expected as usize);
     }
@@ -169,8 +166,8 @@ mod tests {
         // fill opaque part with some data
         let mut data_a8 = vec![0u8; (opaque_size + alpha_size) as usize];
         // Fill alpha with 255 (opaque) to distinguish from zero-init (transparent)
-        for i in opaque_size as usize..data_a8.len() {
-            data_a8[i] = 255;
+        for item in data_a8.iter_mut().skip(opaque_size as usize) {
+            *item = 255;
         }
         let res = PtxDecoder::decode(&data_a8, width, height, 147, None, None, false);
         assert!(

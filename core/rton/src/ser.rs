@@ -363,10 +363,17 @@ impl<W: Write> ser::Serializer for &mut RtonSerializer<W> {
     fn serialize_f64(self, v: f64) -> Result<()> {
         if v == 0.0 {
             self.writer.write_u8(RtonIdentifier::DoubleZero as u8)?;
-        } else {
-            self.writer.write_u8(RtonIdentifier::Double as u8)?;
-            self.writer.write_f64::<LittleEndian>(v)?;
+            return Ok(());
         }
+
+        // Downcast to f32. If their string representations are identical, serialize as f32.
+        let v32 = v as f32;
+        if format!("{}", v) == format!("{}", v32) {
+            return self.serialize_f32(v32);
+        }
+
+        self.writer.write_u8(RtonIdentifier::Double as u8)?;
+        self.writer.write_f64::<LittleEndian>(v)?;
         Ok(())
     }
     fn serialize_map(self, _len: Option<usize>) -> Result<Self::SerializeMap> {

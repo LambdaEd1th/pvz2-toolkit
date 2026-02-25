@@ -19,7 +19,7 @@ fn test_bulk_extract_and_convert() {
         .arg("build")
         .arg("--bin")
         .arg("pvz2-toolkit-cli")
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to build CLI");
     assert!(status_build.success(), "Failed to build CLI binary");
@@ -64,7 +64,7 @@ fn test_bulk_extract_and_convert() {
             .arg(bnk_path)
             .arg("--output")
             .arg(&target_dir)
-            .current_dir(&root_dir)
+            .current_dir(root_dir)
             .status()
             .expect("Failed to execute bnk unpack");
 
@@ -94,7 +94,7 @@ fn test_bulk_extract_and_convert() {
                 .arg(&wem_path)
                 // Output to same temp dir (implicit or explicit)
                 // Default is same dir, which is fine since it's temp
-                .current_dir(&root_dir)
+                .current_dir(root_dir)
                 .status()
                 .expect("Failed to execute wem decode");
 
@@ -200,11 +200,10 @@ fn collect_files(dir: &Path, extension: &str, results: &mut Vec<PathBuf>) {
             let path = entry.path();
             if path.is_dir() {
                 collect_files(&path, extension, results);
-            } else if let Some(ext) = path.extension() {
-                if ext.to_string_lossy().eq_ignore_ascii_case(extension) {
+            } else if let Some(ext) = path.extension()
+                && ext.to_string_lossy().eq_ignore_ascii_case(extension) {
                     results.push(path);
                 }
-            }
         }
     }
 }
@@ -222,7 +221,7 @@ fn test_repack_bnk_round_trip() {
         .arg("build")
         .arg("--bin")
         .arg("pvz2-toolkit-cli")
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to build CLI");
     assert!(status_build.success(), "Failed to build CLI");
@@ -250,7 +249,7 @@ fn test_repack_bnk_round_trip() {
         .arg(&sample_bnk)
         .arg("--output")
         .arg(&extract_dir)
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to extract BNK");
     assert!(status_extract.success(), "Failed to extract sample BNK");
@@ -277,7 +276,7 @@ fn test_repack_bnk_round_trip() {
         .arg(&wem_dir)
         .arg("--output")
         .arg(&repacked_bnk)
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to repack BNK");
 
@@ -292,7 +291,7 @@ fn test_repack_bnk_round_trip() {
         .arg(&repacked_bnk)
         .arg("--output")
         .arg(&verify_dir)
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to verify repacked BNK");
 
@@ -314,7 +313,7 @@ fn test_pack_wem_round_trip() {
         .arg("build")
         .arg("--bin")
         .arg("pvz2-toolkit-cli")
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to build CLI");
     assert!(status_build.success(), "Failed to build CLI");
@@ -353,7 +352,7 @@ fn test_pack_wem_round_trip() {
         .arg(&sample_bnk)
         .arg("--output")
         .arg(&extract_dir)
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to extract BNK");
 
@@ -393,7 +392,7 @@ fn test_pack_wem_round_trip() {
         .arg(&sample_wem)
         .arg("--output")
         .arg(&ogg_path)
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to convert WEM to OGG");
 
@@ -408,7 +407,7 @@ fn test_pack_wem_round_trip() {
         .arg(&ogg_path)
         .arg("--output")
         .arg(&packed_wem_path)
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to pack WEM");
 
@@ -424,7 +423,7 @@ fn test_pack_wem_round_trip() {
         .arg("--output")
         .arg(&verify_ogg_path)
         .arg("--inline-codebooks")
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to verify packed WEM");
 
@@ -458,7 +457,7 @@ fn test_pack_wav_round_trip() {
         .arg("build")
         .arg("--bin")
         .arg("pvz2-toolkit-cli")
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to build CLI");
     assert!(status_build.success(), "Failed to build CLI");
@@ -490,7 +489,7 @@ fn test_pack_wav_round_trip() {
         .arg(&wav_path)
         .arg("--output")
         .arg(&wem_path)
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to run pack-wem");
     assert!(
@@ -508,7 +507,7 @@ fn test_pack_wav_round_trip() {
         .arg("--output")
         .arg(&verify_wav_path)
         // .arg("--original") // For PCM, original is also WAV, so convert-wem default (wav) is fine.
-        .current_dir(&root_dir)
+        .current_dir(root_dir)
         .status()
         .expect("Failed to verify packed WEM");
 

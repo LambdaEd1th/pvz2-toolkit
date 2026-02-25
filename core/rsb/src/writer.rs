@@ -247,7 +247,7 @@ impl<W: Write + Seek> RsbWriter<W> {
         Ok(())
     }
 
-    pub fn write_file_list(&mut self, file_list: &Vec<FileListInfo>) -> Result<(u32, u32)> {
+    pub fn write_file_list(&mut self, file_list: &[FileListInfo]) -> Result<(u32, u32)> {
         let start_offset = self.writer.stream_position()? as u32;
 
         let items: Vec<(String, i32)> = file_list
@@ -255,7 +255,7 @@ impl<W: Write + Seek> RsbWriter<W> {
             .map(|info| (info.name_path.clone(), info.pool_index))
             .collect();
 
-        use shared_utils::file_list::write_file_list;
+        use crate::file_list::write_file_list;
         write_file_list(&mut self.writer, start_offset as u64, &items)?;
 
         let end_offset = self.writer.stream_position()? as u32;
@@ -293,7 +293,7 @@ impl<W: Write + Seek> RsbWriter<W> {
 
                 let mut cat1_bytes: [u8; 4] = [0u8; 4];
                 let bytes = pkt.category[1].as_bytes();
-                if bytes.len() > 0 {
+                if !bytes.is_empty() {
                     let len = std::cmp::min(bytes.len(), 4);
                     cat1_bytes[..len].copy_from_slice(&bytes[..len]);
                 }
@@ -357,8 +357,8 @@ impl<W: Write + Seek> RsbWriter<W> {
     // Refactored RSG Info Writer
     pub fn write_rsg_info(
         &mut self,
-        rsg_infos: &Vec<RsgInfo>,
-        ptx_counts: &Vec<(u32, u32)>,
+        rsg_infos: &[RsgInfo],
+        ptx_counts: &[(u32, u32)],
     ) -> Result<(u32, u32)> {
         let start_offset = self.writer.stream_position()? as u32;
         let each_length = 204;
