@@ -10,7 +10,6 @@ use crate::types::{PamInfo, SpriteInfo};
 pub enum RenderFormat {
     PngSequence,
     Gif,
-    Apng,
 }
 
 pub struct AnimationHelperSetting {
@@ -635,7 +634,7 @@ fn write_image(
                 Ok(())
             })?;
     } else {
-        // For GIF/APNG, render in parallel but collect sequentially
+        // For GIF, render in parallel but collect sequentially
         let rendered_images: Vec<RgbaImage> = frame_keys
             .par_iter()
             .map(|frame_index| {
