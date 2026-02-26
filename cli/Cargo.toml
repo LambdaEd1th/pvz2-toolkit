@@ -16,7 +16,6 @@ serde_json = "1.0"
 byteorder = "1.5"
 rayon = "1.11.0"
 popfx = { version = "0.1.0", path = "../core/popfx" }
-resource = { version = "0.1.0", path = "../core/resource" }
 bnk = { version = "0.1.0", path = "../core/bnk" }
 wem = { version = "0.1.0", path = "../core/wem" }
 patch = { version = "0.1.0", path = "../core/patch" }

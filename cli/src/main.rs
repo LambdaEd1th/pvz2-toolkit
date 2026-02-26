@@ -4,8 +4,7 @@ use clap::{Parser, Subcommand};
 mod commands;
 
 use commands::{
-    atlas, bnk, lawnstrings, newton, pam, patch, popfx, ptx, resource, resources, rsb, rsg, rton,
-    smf, wem,
+    atlas, bnk, lawnstrings, newton, pam, patch, popfx, ptx, resources, rsb, rsg, rton, smf, wem,
 };
 
 #[derive(Parser)]
@@ -60,9 +59,6 @@ enum Commands {
     /// Resources Operations (Convert res.json to resources.json and vice versa)
     #[command(subcommand)]
     Resources(resources::ResourcesCommands),
-    /// Resource Operations (Mapping and manipulation)
-    #[command(subcommand)]
-    Resource(resource::ResourceCommands),
 }
 
 fn main() -> Result<()> {
@@ -83,6 +79,5 @@ fn main() -> Result<()> {
         Commands::Smf(cmd) => smf::handle(cmd),
         Commands::Atlas(cmd) => atlas::handle(cmd),
         Commands::Resources(cmd) => resources::handle(cmd),
-        Commands::Resource(cmd) => resource::handle(cmd), // Added routing arm for Resource
     }
 }

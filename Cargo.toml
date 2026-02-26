@@ -13,7 +13,7 @@ members = [
     "core/smf",
     "core/atlas",
     "core/utils",
-    "core/resources", "core/resource",
+    "core/resources",
 ]
 resolver = "2"
 

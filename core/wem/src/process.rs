@@ -28,6 +28,7 @@ pub fn wem_decode(
     let default_extension = match format_tag {
         0xFFFF => "ogg",          // Vorbis
         0xAAC0 => "m4a",          // AAC
+        0x8311 => "wav",          // ADPCM
         0x0001 | 0xFFFE => "wav", // PCM
         _ => "wav",               // Default fallback
     };
@@ -78,13 +79,25 @@ pub fn wem_decode(
             aac::extract_wem_aac(cursor, &mut out_file)
                 .map_err(|e| WemError::parse(format!("Failed to extract AAC: {}", e)))?;
         }
-        _ => {
-            // PCM/ADPCM -> WAV (Decode)
-            println!("  Format: PCM/ADPCM (decoding to WAV)");
+        0x8311 => {
+            // ADPCM -> WAV (Decode)
+            println!("  Format: Wwise IMA ADPCM (decoding to WAV)");
             let reader = std::io::BufReader::new(file);
-            // pass codebooks by reference
             wav::wem_to_wav(reader, &mut out_file, &codebooks_lib)
                 .map_err(|e| WemError::parse(format!("WAV decoding failed: {:?}", e)))?;
+        }
+        0x0001 | 0xFFFE => {
+            // PCM -> WAV (Decode)
+            println!("  Format: PCM (decoding to WAV)");
+            let reader = std::io::BufReader::new(file);
+            wav::wem_to_wav(reader, &mut out_file, &codebooks_lib)
+                .map_err(|e| WemError::parse(format!("WAV decoding failed: {:?}", e)))?;
+        }
+        _ => {
+            return Err(WemError::parse(format!(
+                "Unsupported format tag: 0x{:04X}",
+                format_tag
+            )));
         }
     }
 
