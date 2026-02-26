@@ -1,4 +1,3 @@
-#![allow(clippy::collapsible_if)]
 use crate::binary::BinaryBlob;
 use crate::error::Error;
 use crate::varint::VarInt;
@@ -482,16 +481,14 @@ impl<'de> Deserialize<'de> for RtonValue {
                     "-Infinity" => return Ok(RtonValue::Double(f64::NEG_INFINITY)),
                     _ => {}
                 }
-                if value.starts_with("$BINARY(\"") {
-                    if let Ok(blob) = BinaryBlob::from_str(value) {
+                if value.starts_with("$BINARY(\"")
+                    && let Ok(blob) = BinaryBlob::from_str(value) {
                         return Ok(RtonValue::Binary(blob));
                     }
-                }
-                if value.starts_with("RTID(") {
-                    if let Ok(rtid) = Rtid::from_str(value) {
+                if value.starts_with("RTID(")
+                    && let Ok(rtid) = Rtid::from_str(value) {
                         return Ok(RtonValue::Rtid(rtid));
                     }
-                }
                 Ok(RtonValue::String(value.to_owned()))
             }
             fn visit_string<E>(self, value: String) -> Result<Self::Value, E>

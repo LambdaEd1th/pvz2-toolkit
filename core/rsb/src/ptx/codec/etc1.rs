@@ -417,13 +417,31 @@ fn gen_horizontal(colors: &[Rgba32; 16]) -> u64 {
     let mut base_c1 = Rgba32::default();
     let mod1 = gen_modifier(&mut base_c1, &left);
     set_table1(&mut data, mod1);
-    gen_pix_diff(&mut data, &left, base_c1, mod1, 0, 2, 0, 4);
+    gen_pix_diff(&mut GenPixDiffContext {
+        data: &mut data,
+        pixels: &left,
+        base_color: base_c1,
+        modifier: mod1,
+        x_offs: 0,
+        x_end: 2,
+        y_offs: 0,
+        y_end: 4,
+    });
 
     let right = get_right_colors(colors);
     let mut base_c2 = Rgba32::default();
     let mod2 = gen_modifier(&mut base_c2, &right);
     set_table2(&mut data, mod2);
-    gen_pix_diff(&mut data, &right, base_c2, mod2, 2, 4, 0, 4);
+    gen_pix_diff(&mut GenPixDiffContext {
+        data: &mut data,
+        pixels: &right,
+        base_color: base_c2,
+        modifier: mod2,
+        x_offs: 2,
+        x_end: 4,
+        y_offs: 0,
+        y_end: 4,
+    });
 
     set_base_colors(&mut data, base_c1, base_c2);
     data
@@ -437,13 +455,31 @@ fn gen_vertical(colors: &[Rgba32; 16]) -> u64 {
     let mut base_c1 = Rgba32::default();
     let mod1 = gen_modifier(&mut base_c1, &top);
     set_table1(&mut data, mod1);
-    gen_pix_diff(&mut data, &top, base_c1, mod1, 0, 4, 0, 2);
+    gen_pix_diff(&mut GenPixDiffContext {
+        data: &mut data,
+        pixels: &top,
+        base_color: base_c1,
+        modifier: mod1,
+        x_offs: 0,
+        x_end: 4,
+        y_offs: 0,
+        y_end: 2,
+    });
 
     let bottom = get_bottom_colors(colors);
     let mut base_c2 = Rgba32::default();
     let mod2 = gen_modifier(&mut base_c2, &bottom);
     set_table2(&mut data, mod2);
-    gen_pix_diff(&mut data, &bottom, base_c2, mod2, 0, 4, 2, 4);
+    gen_pix_diff(&mut GenPixDiffContext {
+        data: &mut data,
+        pixels: &bottom,
+        base_color: base_c2,
+        modifier: mod2,
+        x_offs: 0,
+        x_end: 4,
+        y_offs: 2,
+        y_end: 4,
+    });
 
     set_base_colors(&mut data, base_c1, base_c2);
     data
@@ -486,33 +522,36 @@ fn set_base_colors(data: &mut u64, color1: Rgba32, color2: Rgba32) {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn gen_pix_diff(
-    data: &mut u64,
-    pixels: &[Rgba32],
+struct GenPixDiffContext<'a> {
+    data: &'a mut u64,
+    pixels: &'a [Rgba32],
     base_color: Rgba32,
     modifier: usize,
     x_offs: usize,
     x_end: usize,
     y_offs: usize,
     y_end: usize,
-) {
-    let base_mean = (base_color.r as i32 + base_color.g as i32 + base_color.b as i32) / 3;
+}
+
+fn gen_pix_diff(ctx: &mut GenPixDiffContext) {
+    let base_mean =
+        (ctx.base_color.r as i32 + ctx.base_color.g as i32 + ctx.base_color.b as i32) / 3;
     let mut i = 0;
 
-    for yy in y_offs..y_end {
-        for xx in x_offs..x_end {
-            let diff =
-                ((pixels[i].r as i32 + pixels[i].g as i32 + pixels[i].b as i32) / 3) - base_mean;
+    for yy in ctx.y_offs..ctx.y_end {
+        for xx in ctx.x_offs..ctx.x_end {
+            let diff = ((ctx.pixels[i].r as i32 + ctx.pixels[i].g as i32 + ctx.pixels[i].b as i32)
+                / 3)
+                - base_mean;
 
             if diff < 0 {
-                *data |= 1u64 << (xx * 4 + yy + 16);
+                *ctx.data |= 1u64 << (xx * 4 + yy + 16);
             }
-            let tbl_diff1 = diff.abs() - ETC1_MODIFIERS[modifier][0];
-            let tbl_diff2 = diff.abs() - ETC1_MODIFIERS[modifier][1];
+            let tbl_diff1 = diff.abs() - ETC1_MODIFIERS[ctx.modifier][0];
+            let tbl_diff2 = diff.abs() - ETC1_MODIFIERS[ctx.modifier][1];
 
             if tbl_diff2.abs() < tbl_diff1.abs() {
-                *data |= 1u64 << (xx * 4 + yy);
+                *ctx.data |= 1u64 << (xx * 4 + yy);
             }
             i += 1;
         }

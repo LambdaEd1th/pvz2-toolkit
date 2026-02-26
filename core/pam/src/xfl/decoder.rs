@@ -131,47 +131,38 @@ pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
         for entry in fs::read_dir(source_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                if stem.starts_with("source_") {
-                    if let Ok(idx) = stem[7..].parse::<i32>() {
-                        let xml_str = fs::read_to_string(&path)?;
-                        let mut rd = Reader::from_str(&xml_str);
-                        rd.config_mut().trim_text(true);
-                        loop {
-                            match rd.read_event() {
-                                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                                    if e.name().as_ref() == b"DOMBitmapInstance" {
-                                        for attr in e.attributes() {
-                                            let attr = attr?;
-                                            if attr.key.as_ref() == b"libraryItemName" {
-                                                let name = String::from_utf8_lossy(&attr.value)
-                                                    .replace("media/", "");
-                                                id_to_name.insert(idx, name.clone());
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && stem.starts_with("source_")
+                && let Ok(idx) = stem[7..].parse::<i32>()
+            {
+                let xml_str = fs::read_to_string(&path)?;
+                let mut rd = Reader::from_str(&xml_str);
+                rd.config_mut().trim_text(true);
+                loop {
+                    match rd.read_event() {
+                        Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                            if e.name().as_ref() == b"DOMBitmapInstance" {
+                                for attr in e.attributes() {
+                                    let attr = attr?;
+                                    if attr.key.as_ref() == b"libraryItemName" {
+                                        let name = String::from_utf8_lossy(&attr.value)
+                                            .replace("media/", "");
+                                        id_to_name.insert(idx, name.clone());
 
-                                                let mut size = [0, 0];
-                                                if let Some(caps) = dim_regex.captures(&name) {
-                                                    size[0] = caps
-                                                        .get(1)
-                                                        .unwrap()
-                                                        .as_str()
-                                                        .parse()
-                                                        .unwrap_or(0);
-                                                    size[1] = caps
-                                                        .get(2)
-                                                        .unwrap()
-                                                        .as_str()
-                                                        .parse()
-                                                        .unwrap_or(0);
-                                                }
-                                                id_to_size.insert(idx, size);
-                                            }
+                                        let mut size = [0, 0];
+                                        if let Some(caps) = dim_regex.captures(&name) {
+                                            size[0] =
+                                                caps.get(1).unwrap().as_str().parse().unwrap_or(0);
+                                            size[1] =
+                                                caps.get(2).unwrap().as_str().parse().unwrap_or(0);
                                         }
+                                        id_to_size.insert(idx, size);
                                     }
                                 }
-                                Ok(Event::Eof) => break,
-                                _ => {}
                             }
                         }
+                        Ok(Event::Eof) => break,
+                        _ => {}
                     }
                 }
             }
@@ -232,12 +223,11 @@ pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
         for entry in fs::read_dir(sprite_dir)? {
             let entry = entry?;
             let path = entry.path();
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                if stem.starts_with("sprite_") {
-                    if let Ok(idx) = stem[7..].parse::<i32>() {
-                        sprite_files.push((idx, path));
-                    }
-                }
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
+                && stem.starts_with("sprite_")
+                && let Ok(idx) = stem[7..].parse::<i32>()
+            {
+                sprite_files.push((idx, path));
             }
         }
     }
@@ -332,16 +322,10 @@ fn parse_sprite_document(path: &Path) -> Result<SpriteInfo> {
                         let attr = attr?;
                         if attr.key.as_ref() == b"libraryItemName" {
                             let lib_item = String::from_utf8_lossy(&attr.value);
-                            if lib_item.starts_with("image/image_") {
-                                resource_id =
-                                    lib_item["image/image_".len()..].parse::<i32>().unwrap_or(1)
-                                        - 1;
-                            } else if lib_item.starts_with("sprite/sprite_") {
-                                resource_id = lib_item["sprite/sprite_".len()..]
-                                    .parse::<i32>()
-                                    .unwrap_or(1)
-                                    - 1
-                                    + 10000;
+                            if let Some(stripped) = lib_item.strip_prefix("image/image_") {
+                                resource_id = stripped.parse::<i32>().unwrap_or(1) - 1;
+                            } else if let Some(stripped) = lib_item.strip_prefix("sprite/sprite_") {
+                                resource_id = stripped.parse::<i32>().unwrap_or(1) - 1 + 10000;
                             }
                         } else if attr.key.as_ref() == b"firstFrame" {
                             first_frame =
@@ -417,14 +401,14 @@ fn parse_sprite_document(path: &Path) -> Result<SpriteInfo> {
             Ok(Event::End(ref e)) => match e.name().as_ref() {
                 b"DOMFrame" => {
                     if let Some(z) = current_z_index {
-                        let tl = state_map.entry(z).or_insert_with(|| Vec::new());
+                        let tl = state_map.entry(z).or_default();
                         let end_idx = current_start_idx + current_duration;
                         if tl.len() < end_idx {
                             tl.resize(end_idx, None);
                         }
                         if let Some(state) = &current_state {
-                            for t in current_start_idx..end_idx {
-                                tl[t] = Some(state.clone());
+                            for item in tl.iter_mut().take(end_idx).skip(current_start_idx) {
+                                *item = Some(state.clone());
                             }
                         }
                     }
@@ -508,7 +492,7 @@ fn parse_sprite_document(path: &Path) -> Result<SpriteInfo> {
                 if transform_change || color_change || frame_change {
                     let mut color_arr = None;
                     if c.color != vec![1.0, 1.0, 1.0, 1.0] {
-                        let r = *c.color.get(0).unwrap_or(&1.0);
+                        let r = *c.color.first().unwrap_or(&1.0);
                         let g = *c.color.get(1).unwrap_or(&1.0);
                         let b = *c.color.get(2).unwrap_or(&1.0);
                         let a = *c.color.get(3).unwrap_or(&1.0);

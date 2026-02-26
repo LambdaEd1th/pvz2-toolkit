@@ -6,7 +6,6 @@ use symphonia::core::formats::FormatOptions;
 use symphonia::core::io::{MediaSourceStream, ReadOnlySource};
 use symphonia::core::meta::MetadataOptions;
 
-#[allow(dead_code)]
 pub fn extract_aac<R: Read + Seek, W: Write>(
     mut input: R,
     mut output: W,

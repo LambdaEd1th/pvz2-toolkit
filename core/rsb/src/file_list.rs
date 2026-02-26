@@ -1,5 +1,4 @@
-#![allow(clippy::needless_question_mark)]
-use byteorder::{ReadBytesExt, WriteBytesExt, LE};
+use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use std::collections::HashMap;
 use std::io::{Read, Result, Seek, SeekFrom, Write};
 
@@ -10,7 +9,7 @@ pub trait FileListPayload: Sized {
 
 impl FileListPayload for i32 {
     fn read(reader: &mut impl Read) -> Result<Self> {
-        Ok(reader.read_i32::<LE>()?)
+        reader.read_i32::<LE>()
     }
 
     fn write(&self, writer: &mut impl Write) -> Result<()> {

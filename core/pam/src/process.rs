@@ -8,31 +8,13 @@ pub fn pam_decode(
     input: &Path,
     output: &Option<PathBuf>,
     resolution: i32,
-    format: Option<&str>,
+    format: &str,
 ) -> Result<()> {
     // Decode PAM -> JSON/HTML/XFL
     let mut file = fs::File::open(input).context("Failed to open input file")?;
     let pam_value = decode_pam(&mut file).context("Failed to decode PAM")?;
 
-    let format_str = format
-        .map(|s| s.to_lowercase())
-        .unwrap_or_else(|| match output {
-            Some(p) => {
-                let path_str = p.to_string_lossy().to_lowercase();
-                if path_str.ends_with(".xfl")
-                    || path_str.ends_with("\\xfl")
-                    || path_str.ends_with("/xfl")
-                    || p.extension().is_none()
-                {
-                    "xfl".to_string()
-                } else if path_str.ends_with(".html") {
-                    "html".to_string()
-                } else {
-                    "json".to_string()
-                }
-            }
-            None => "json".to_string(),
-        });
+    let format_str = format.to_lowercase();
 
     if format_str == "xfl" {
         let out_dir = match output {
@@ -77,23 +59,10 @@ pub fn pam_encode(
     input: &Path,
     output: &Option<PathBuf>,
     resolution: i32,
-    format: Option<&str>,
+    format: &str,
 ) -> Result<()> {
     // Encode JSON/HTML/XFL -> PAM
-    let format_str = format.map(|s| s.to_lowercase()).unwrap_or_else(|| {
-        let ext = input
-            .extension()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_lowercase();
-        if input.is_dir() || ext == "xfl" || ext == "xml" {
-            "xfl".to_string()
-        } else if ext == "html" {
-            "html".to_string()
-        } else {
-            "json".to_string()
-        }
-    });
+    let format_str = format.to_lowercase();
 
     let pam_value = if format_str == "html" {
         let content = fs::read_to_string(input).context("Failed to read input file")?;

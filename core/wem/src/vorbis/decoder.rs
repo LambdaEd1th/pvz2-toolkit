@@ -268,7 +268,6 @@ struct ChunkInfo {
 /// # Ok(())
 /// # }
 /// ```
-#[allow(dead_code)]
 pub struct WwiseRiffVorbis<R: Read + Seek> {
     input: R,
     codebooks: CodebookLibrary,
@@ -807,11 +806,9 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
         let mut packet_writer = PacketWriter::new(output);
         let serial = 0x80000001; // Random serial or fixed
 
-        #[allow(unused_assignments)]
-        let mut mode_blockflag: Option<Vec<bool>> = None;
+        let mode_blockflag: Option<Vec<bool>>;
         let mut mode_bits = 0i32;
 
-        #[allow(unused_mut)]
         let mut prev_blockflag = false;
 
         if self.header_triad_present {
@@ -872,8 +869,7 @@ impl<R: Read + Seek> WwiseRiffVorbis<R> {
             offset = packet_payload_offset;
             self.input.seek(SeekFrom::Start(offset))?;
 
-            #[allow(unused_assignments)]
-            let mut current_granule: u64 = 0;
+            let current_granule: u64;
 
             // Determine granule for this page
             let is_last_packet = next_offset >= data_end;

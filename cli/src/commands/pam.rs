@@ -17,7 +17,7 @@ pub enum PamCommands {
         resolution: i32,
         /// Explicit output format: json, html, or xfl
         #[arg(short, long)]
-        format: Option<String>,
+        format: String,
     },
     /// Encode JSON/HTML to PAM
     Encode {
@@ -31,7 +31,7 @@ pub enum PamCommands {
         resolution: i32,
         /// Explicit input format: json, html, or xfl
         #[arg(short, long)]
-        format: Option<String>,
+        format: String,
     },
     /// Render PAM animation frames from JSON
     Render {
@@ -59,13 +59,13 @@ pub fn handle(cmd: PamCommands) -> Result<()> {
             output,
             resolution,
             format,
-        } => Ok(pam_decode(&input, &output, resolution, format.as_deref())?),
+        } => Ok(pam_decode(&input, &output, resolution, &format)?),
         PamCommands::Encode {
             input,
             output,
             resolution,
             format,
-        } => Ok(pam_encode(&input, &output, resolution, format.as_deref())?),
+        } => Ok(pam_encode(&input, &output, resolution, &format)?),
         PamCommands::Render {
             input,
             media,

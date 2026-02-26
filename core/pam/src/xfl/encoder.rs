@@ -393,11 +393,10 @@ fn decode_frame_node_list(
             if let Some(layer) = model.get_mut(&change.index) {
                 layer.state = Some(true);
                 layer.transform = variant_to_standard(&change.transform);
-                if let Some(c) = &change.color {
-                    if c[0] != 0.0 || c[1] != 0.0 {
+                if let Some(c) = &change.color
+                    && (c[0] != 0.0 || c[1] != 0.0) {
                         layer.color = *c;
                     }
-                }
             }
         }
 
@@ -406,11 +405,10 @@ fn decode_frame_node_list(
         for (&layer_index, layer) in model.iter_mut() {
             let node_list = frame_node_list.entry(layer_index + 1).or_default();
 
-            if layer.state.is_some() {
-                if let Some(last_node) = node_list.last_mut() {
+            if layer.state.is_some()
+                && let Some(last_node) = node_list.last_mut() {
                     last_node.duration = layer.frame_duration;
                 }
-            }
 
             if layer.state == Some(true) {
                 node_list.push(DomFrameData {
@@ -445,13 +443,11 @@ fn decode_frame_node_list(
     // Close out remaining models
     let remaining_keys: Vec<i32> = model.keys().copied().collect();
     for layer_index in remaining_keys {
-        if let Some(layer) = model.remove(&layer_index) {
-            if let Some(node_list) = frame_node_list.get_mut(&(layer_index + 1)) {
-                if let Some(last_node) = node_list.last_mut() {
+        if let Some(layer) = model.remove(&layer_index)
+            && let Some(node_list) = frame_node_list.get_mut(&(layer_index + 1))
+                && let Some(last_node) = node_list.last_mut() {
                     last_node.duration = layer.frame_duration;
                 }
-            }
-        }
     }
 
     frame_node_list

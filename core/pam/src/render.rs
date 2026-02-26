@@ -1,4 +1,3 @@
-#![allow(clippy::collapsible_if)]
 use anyhow::{Context, Result, anyhow};
 use image::RgbaImage;
 use std::collections::{BTreeMap, HashMap};
@@ -43,8 +42,7 @@ struct ImageSequenceList {
     pub image_width: u32,
     pub image_height: u32,
     pub matrix: [f64; 6],
-    #[allow(dead_code)]
-    pub image_name: String,
+
     pub image_index: usize,
     pub disable_sprite: bool,
     pub transform: Vec<[f64; 6]>,
@@ -88,7 +86,6 @@ pub fn render_animation(
             image_width: width.max(0) as u32,
             image_height: height.max(0) as u32,
             matrix: transform,
-            image_name: image_name.clone(),
             image_index: i,
             disable_sprite: false,
             transform: Vec::new(),
@@ -151,16 +148,15 @@ pub fn render_animation(
     let width = width as u32 + setting.append_width as u32;
     let height = height as u32 + setting.append_height as u32;
 
-    write_image(
-        &main_sprite_frame,
+    let ctx = WriteImageContext {
+        main_sprite_frame: &main_sprite_frame,
         setting,
-        &image_list,
-        width,
-        height,
-        &max_pos,
+        image_list: &image_list,
+        max_pos: &max_pos,
         out_folder,
-        pam.frame_rate,
-    )?;
+        frame_rate: pam.frame_rate,
+    };
+    write_image(&ctx, width, height)?;
 
     Ok(write_label_info(pam))
 }
@@ -245,8 +241,7 @@ fn find_image_square(
 struct LayerState {
     resource: usize,
     sprite: bool,
-    #[allow(dead_code)]
-    frame_start: i32,
+
     frame_duration: i32,
     color: [f64; 4],
     transform: [f64; 6],
@@ -314,7 +309,6 @@ fn read_sprite(
                 LayerState {
                     resource: append.resource as usize,
                     sprite: append.sprite,
-                    frame_start: i as i32,
                     frame_duration: 1,
                     color: [1.0, 1.0, 1.0, 1.0],
                     transform: [1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
@@ -331,10 +325,11 @@ fn read_sprite(
                 if !t.is_empty() {
                     layer.transform = variant_to_standard(t)?;
                 }
-                if let Some(c) = &change.color {
-                    if c.len() >= 4 && (c[0] != 0.0 || c[1] != 0.0) {
-                        layer.color = [c[0], c[1], c[2], c[3]];
-                    }
+                if let Some(c) = &change.color
+                    && c.len() >= 4
+                    && (c[0] != 0.0 || c[1] != 0.0)
+                {
+                    layer.color = [c[0], c[1], c[2], c[3]];
                 }
             }
         }
@@ -394,19 +389,6 @@ fn read_sprite(
     }
 
     Ok(sprite_image_list)
-}
-
-#[allow(dead_code)]
-fn apply_color(img: &mut RgbaImage, color: &[f64; 4]) {
-    for pixel in img.pixels_mut() {
-        if pixel[3] > 0 {
-            // Optimize by only modifying non-transparent pixels
-            pixel[0] = (pixel[0] as f64 * color[0]).clamp(0.0, 255.0) as u8;
-            pixel[1] = (pixel[1] as f64 * color[1]).clamp(0.0, 255.0) as u8;
-            pixel[2] = (pixel[2] as f64 * color[2]).clamp(0.0, 255.0) as u8;
-            pixel[3] = (pixel[3] as f64 * color[3]).clamp(0.0, 255.0) as u8;
-        }
-    }
 }
 
 fn composite_images(
@@ -584,27 +566,26 @@ fn composite_images(
 
 use rayon::prelude::*;
 
-#[allow(clippy::too_many_arguments)]
-fn write_image(
-    main_sprite_frame: &HashMap<i32, Vec<ImageSequenceList>>,
-    setting: &AnimationHelperSetting,
-    image_list: &[RgbaImage],
-    width: u32,
-    height: u32,
-    max_pos: &[f64; 2],
-    out_folder: &Path,
+struct WriteImageContext<'a> {
+    main_sprite_frame: &'a HashMap<i32, Vec<ImageSequenceList>>,
+    setting: &'a AnimationHelperSetting,
+    image_list: &'a [RgbaImage],
+    max_pos: &'a [f64; 2],
+    out_folder: &'a Path,
     frame_rate: i32,
-) -> Result<()> {
-    let mut frame_keys: Vec<i32> = main_sprite_frame.keys().cloned().collect();
+}
+
+fn write_image(ctx: &WriteImageContext, width: u32, height: u32) -> Result<()> {
+    let mut frame_keys: Vec<i32> = ctx.main_sprite_frame.keys().cloned().collect();
     frame_keys.sort_unstable();
 
-    let delay_ms = if frame_rate > 0 {
-        1000 / frame_rate as u32
+    let delay_ms = if ctx.frame_rate > 0 {
+        1000 / ctx.frame_rate as u32
     } else {
         100
     };
     let delay = image::Delay::from_numer_denom_ms(delay_ms, 1);
-    let write_sequence = setting.format == RenderFormat::PngSequence;
+    let write_sequence = ctx.setting.format == RenderFormat::PngSequence;
 
     if write_sequence {
         // Render and write to disk in parallel
@@ -612,24 +593,25 @@ fn write_image(
             .par_iter()
             .try_for_each(|frame_index| -> Result<()> {
                 let mut image = RgbaImage::new(width, height);
-                if let Some(layers) = main_sprite_frame.get(frame_index) {
+                if let Some(layers) = ctx.main_sprite_frame.get(frame_index) {
                     for layer_sprite in layers {
                         if !layer_sprite.disable_sprite
-                            && layer_sprite.image_index < image_list.len()
+                            && layer_sprite.image_index < ctx.image_list.len()
                         {
-                            let sprite_image = &image_list[layer_sprite.image_index];
+                            let sprite_image = &ctx.image_list[layer_sprite.image_index];
                             composite_images(
                                 &mut image,
                                 layer_sprite,
                                 sprite_image,
-                                max_pos,
-                                setting,
+                                ctx.max_pos,
+                                ctx.setting,
                             );
                         }
                     }
                 }
-                let out_file =
-                    out_folder.join(format!("{}_{}.png", setting.frame_name, frame_index));
+                let out_file = ctx
+                    .out_folder
+                    .join(format!("{}_{}.png", ctx.setting.frame_name, frame_index));
                 image.save(&out_file)?;
                 Ok(())
             })?;
@@ -639,18 +621,18 @@ fn write_image(
             .par_iter()
             .map(|frame_index| {
                 let mut image = RgbaImage::new(width, height);
-                if let Some(layers) = main_sprite_frame.get(frame_index) {
+                if let Some(layers) = ctx.main_sprite_frame.get(frame_index) {
                     for layer_sprite in layers {
                         if !layer_sprite.disable_sprite
-                            && layer_sprite.image_index < image_list.len()
+                            && layer_sprite.image_index < ctx.image_list.len()
                         {
-                            let sprite_image = &image_list[layer_sprite.image_index];
+                            let sprite_image = &ctx.image_list[layer_sprite.image_index];
                             composite_images(
                                 &mut image,
                                 layer_sprite,
                                 sprite_image,
-                                max_pos,
-                                setting,
+                                ctx.max_pos,
+                                ctx.setting,
                             );
                         }
                     }
@@ -664,8 +646,10 @@ fn write_image(
             .map(|image| image::Frame::from_parts(image, 0, 0, delay))
             .collect();
 
-        if setting.format == RenderFormat::Gif {
-            let out_file = out_folder.join(format!("{}.gif", setting.frame_name));
+        if ctx.setting.format == RenderFormat::Gif {
+            let out_file = ctx
+                .out_folder
+                .join(format!("{}.gif", ctx.setting.frame_name));
             let mut file = std::fs::File::create(&out_file)?;
             let mut encoder = image::codecs::gif::GifEncoder::new(&mut file);
             encoder.set_repeat(image::codecs::gif::Repeat::Infinite)?;

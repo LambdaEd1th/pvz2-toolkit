@@ -1,4 +1,3 @@
-#![allow(clippy::collapsible_if)]
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 pub mod error;
 pub mod process;
@@ -346,8 +345,8 @@ pub fn encode_newton(resource: &MResourceGroup, mut writer: impl Write) -> Resul
             write_string(&mut writer, p)?;
         }
 
-        if group.group_type == "composite" {
-            if let Some(subs) = &group.subgroups {
+        if group.group_type == "composite"
+            && let Some(subs) = &group.subgroups {
                 for sub in subs {
                     let sub_res_val = if let Some(r) = &sub.res {
                         r.parse::<u32>().unwrap_or(0)
@@ -358,10 +357,9 @@ pub fn encode_newton(resource: &MResourceGroup, mut writer: impl Write) -> Resul
                     write_string(&mut writer, &sub.id)?;
                 }
             }
-        }
 
-        if group.group_type == "simple" {
-            if let Some(res_list) = &group.resources {
+        if group.group_type == "simple"
+            && let Some(res_list) = &group.resources {
                 for res in res_list {
                     let type_byte = match res.res_type.as_str() {
                         "Image" => 1,
@@ -431,7 +429,6 @@ pub fn encode_newton(resource: &MResourceGroup, mut writer: impl Write) -> Resul
                     }
                 }
             }
-        }
     }
 
     Ok(())

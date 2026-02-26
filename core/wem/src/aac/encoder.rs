@@ -1,4 +1,3 @@
-#![allow(clippy::collapsible_if)]
 use crate::error::{WemError, WemResult};
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::fs::File;
@@ -36,11 +35,10 @@ pub fn probe_m4a_metadata(path: &Path) -> WemResult<(u16, u32, u32)> {
     let mut avg_bytes = 16000; // Fallback
     if let Some(n_frames) = codec_params.n_frames {
         let duration = n_frames as f64 / sample_rate as f64;
-        if duration > 0.0 {
-            if let Ok(meta) = std::fs::metadata(path) {
+        if duration > 0.0
+            && let Ok(meta) = std::fs::metadata(path) {
                 avg_bytes = (meta.len() as f64 / duration) as u32;
             }
-        }
     }
 
     Ok((channels, sample_rate, avg_bytes))

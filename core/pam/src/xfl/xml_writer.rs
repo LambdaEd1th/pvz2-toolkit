@@ -18,7 +18,7 @@ impl<W: Write> XmlWriter<W> {
     pub fn write_header(&mut self) -> io::Result<()> {
         self.writer
             .write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -29,23 +29,22 @@ impl<W: Write> XmlWriter<W> {
         }
         self.writer
             .write_event(Event::Start(elem))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         self.element_stack.push(name.to_string());
         Ok(())
     }
 
     pub fn end_element(&mut self, name: &str) -> io::Result<()> {
-        if let Some(expected) = self.element_stack.pop() {
-            if expected != name {
+        if let Some(expected) = self.element_stack.pop()
+            && expected != name {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("Mismatched xml tags: expected {}, got {}", expected, name),
                 ));
             }
-        }
         self.writer
             .write_event(Event::End(BytesEnd::new(name)))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(())
     }
 
@@ -63,17 +62,17 @@ impl<W: Write> XmlWriter<W> {
         if let Some(text) = content {
             self.writer
                 .write_event(Event::Start(elem.clone()))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
             self.writer
                 .write_event(Event::Text(BytesText::new(text)))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
             self.writer
                 .write_event(Event::End(elem.to_end()))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
         } else {
             self.writer
                 .write_event(Event::Empty(elem))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+                .map_err(io::Error::other)?;
         }
         Ok(())
     }
@@ -83,11 +82,11 @@ impl<W: Write> XmlWriter<W> {
         self.writer
             .get_mut()
             .write_all(content.as_bytes())
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         self.writer
             .get_mut()
             .write_all(b"\n")
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(())
     }
 }
