@@ -15,6 +15,9 @@ pub enum PamCommands {
         /// Flash XFL scale resolution (default 1200)
         #[arg(short, long, default_value = "1200")]
         resolution: i32,
+        /// Explicit output format: json, html, or xfl
+        #[arg(short, long)]
+        format: Option<String>,
     },
     /// Encode JSON/HTML to PAM
     Encode {
@@ -26,6 +29,9 @@ pub enum PamCommands {
         /// Flash XFL scale resolution (default 1200)
         #[arg(short, long, default_value = "1200")]
         resolution: i32,
+        /// Explicit input format: json, html, or xfl
+        #[arg(short, long)]
+        format: Option<String>,
     },
     /// Render PAM animation frames from JSON
     Render {
@@ -52,12 +58,14 @@ pub fn handle(cmd: PamCommands) -> Result<()> {
             input,
             output,
             resolution,
-        } => Ok(pam_decode(&input, &output, resolution)?),
+            format,
+        } => Ok(pam_decode(&input, &output, resolution, format.as_deref())?),
         PamCommands::Encode {
             input,
             output,
             resolution,
-        } => Ok(pam_encode(&input, &output, resolution)?),
+            format,
+        } => Ok(pam_encode(&input, &output, resolution, format.as_deref())?),
         PamCommands::Render {
             input,
             media,
