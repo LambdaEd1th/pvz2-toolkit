@@ -1,7 +1,7 @@
 use crate::error::Result;
 use crate::rsg::types::UnpackedFile;
 use crate::rsg::{pack_rsg, unpack_rsg};
-use crate::types::*;
+use crate::schema::types::*;
 
 use std::fs;
 use std::io::{Cursor, Read, Seek, SeekFrom};

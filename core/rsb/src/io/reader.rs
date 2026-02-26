@@ -1,6 +1,6 @@
 use crate::error::{Result, RsbError};
-use crate::file_list::read_file_list;
-use crate::types::{
+use crate::schema::file_list::read_file_list;
+use crate::schema::types::{
     AutoPoolInfo, CompositeInfo, CompositePacketInfo, DescriptionGroup, DescriptionResources,
     DescriptionSubGroup, FileListInfo, PropertiesPtxInfo, ResourcesDescription, RsbHeader,
     RsbPtxInfo, RsgInfo,

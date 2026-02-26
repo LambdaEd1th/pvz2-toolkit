@@ -1,5 +1,5 @@
 use crate::error::{Result, RsbError};
-use crate::file_list::read_file_list;
+use crate::schema::file_list::read_file_list;
 use crate::rsg::types::{Part0Info, Part1Extra, Part1Info, RsgPayload, UnpackedFile};
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use flate2::Compression;
@@ -195,7 +195,7 @@ pub fn pack_rsg<W: Write + Seek>(
     let file_list_offset = (writer.stream_position()? - start_pos) as u32;
 
     let file_list_begin = writer.stream_position()?;
-    use crate::file_list::write_file_list;
+    use crate::schema::file_list::write_file_list;
     write_file_list(writer, file_list_begin, &file_list_entries)?;
     let file_list_end = writer.stream_position()?;
     let file_list_len = (file_list_end - file_list_begin) as u32;

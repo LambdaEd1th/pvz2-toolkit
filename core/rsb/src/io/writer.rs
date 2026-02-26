@@ -1,5 +1,5 @@
 use crate::error::Result;
-use crate::types::*;
+use crate::schema::types::*;
 use byteorder::{LE, WriteBytesExt};
 use std::collections::HashMap;
 use std::io::{Seek, Write};
@@ -255,7 +255,7 @@ impl<W: Write + Seek> RsbWriter<W> {
             .map(|info| (info.name_path.clone(), info.pool_index))
             .collect();
 
-        use crate::file_list::write_file_list;
+        use crate::schema::file_list::write_file_list;
         write_file_list(&mut self.writer, start_offset as u64, &items)?;
 
         let end_offset = self.writer.stream_position()? as u32;

@@ -2,7 +2,7 @@ use crate::Rsb;
 use crate::error::Result;
 use crate::ptx::decoder::PtxDecoder;
 use crate::rsg::unpack_rsg;
-use crate::types::*;
+use crate::schema::types::*;
 use std::fs;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};

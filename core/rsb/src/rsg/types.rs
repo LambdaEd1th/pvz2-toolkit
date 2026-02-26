@@ -1,4 +1,4 @@
-use crate::file_list::FileListPayload;
+use crate::schema::file_list::FileListPayload;
 use byteorder::{LE, ReadBytesExt, WriteBytesExt};
 use serde::{Deserialize, Serialize};
 use std::io::{Read, Write};

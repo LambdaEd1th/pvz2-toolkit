@@ -1,8 +1,8 @@
 use crate::error::Result;
 use crate::rsg::pack_rsg;
 use crate::rsg::types::UnpackedFile;
-use crate::types::*;
-use crate::writer::RsbWriter;
+use crate::schema::types::*;
+use crate::io::writer::RsbWriter;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
