@@ -14,8 +14,6 @@ pub enum NewtonError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error("Json error: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("Xml error: {0}")]
-    Xml(#[from] serde_xml_rs::Error),
     #[error("Other: {0}")]
     Other(String),
     #[error("Deserialization error: {0}")]

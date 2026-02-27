@@ -3,7 +3,6 @@ pub mod binary; // Keep binary for BinaryBlob
 pub mod crypto;
 pub mod de;
 pub mod error;
-pub mod process;
 // mod rtid; // Moved to types
 pub mod ser;
 pub mod types;
@@ -16,7 +15,6 @@ pub use types::{Rtid, RtidIdentifier, RtonIdentifier, RtonValue};
 pub use varint::VarInt;
 
 pub use de::{from_bytes, from_reader};
-pub use process::{rton_decode, rton_decrypt_file, rton_encode, rton_encrypt_file};
 pub use ser::{to_bytes, to_writer};
 
 #[cfg(test)]

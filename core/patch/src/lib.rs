@@ -2,7 +2,6 @@ use std::io::{Read, Write};
 
 pub mod error;
 pub mod io;
-pub mod process;
 pub mod types;
 
 pub use error::{PatchError, Result};

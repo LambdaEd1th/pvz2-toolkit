@@ -1,7 +1,7 @@
-pub mod batch;
-pub mod process;
+pub mod pack;
 pub mod types;
+pub mod unpack;
 
-pub use batch::{pack_rsg_batch, unpack_rsg_batch};
-pub use process::{pack_rsg, unpack_rsg};
+pub use pack::pack_rsg;
 pub use types::{Part0Info, Part1Extra, Part1Info, RsgPayload, UnpackedFile};
+pub use unpack::unpack_rsg;

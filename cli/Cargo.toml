@@ -21,7 +21,8 @@ wem = { version = "0.1.0", path = "../core/wem" }
 patch = { version = "0.1.0", path = "../core/patch" }
 smf = { version = "0.1.0", path = "../core/smf" }
 image = "0.25"
-serde-xml-rs = "0.8.2"
 md-5 = "0.10.6"
 atlas = { path = "../core/atlas" }
 pvz2_resources = { path = "../core/resources", package = "resources" }
+texture_packer = "0.30.0"
+walkdir = "2.5.0"
