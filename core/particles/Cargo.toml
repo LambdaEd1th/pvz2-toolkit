@@ -1,0 +1,11 @@
+[package]
+name = "particles"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+byteorder = "1.5"
+thiserror = "1.0"
+flate2 = { version = "1.0", features = ["zlib"] }
+serde = { version = "1.0", features = ["derive"] }
+quick-xml = "0.37"

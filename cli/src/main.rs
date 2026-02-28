@@ -4,7 +4,8 @@ use clap::{Parser, Subcommand};
 mod commands;
 
 use commands::{
-    atlas, bnk, lawnstrings, newton, pam, patch, popfx, ptx, resources, rsb, rsg, rton, smf, wem,
+    atlas, bnk, lawnstrings, newton, pak, pam, particles, patch, popfx, ptx, reanim, resources,
+    rsb, rsg, rton, smf, wem,
 };
 
 #[derive(Parser)]
@@ -59,6 +60,15 @@ enum Commands {
     /// Resources Operations (Convert res.json to resources.json and vice versa)
     #[command(subcommand)]
     Resources(resources::ResourcesCommands),
+    /// PAK Operations (Unpack/Pack PvZ PAK archives)
+    #[command(subcommand)]
+    Pak(pak::PakCommands),
+    /// Reanim Operations (Decode/Encode Animations)
+    #[command(subcommand)]
+    Reanim(reanim::ReanimCommands),
+    /// Particles Operations (Decode/Encode Particles)
+    #[command(subcommand)]
+    Particles(particles::ParticlesCommands),
 }
 
 fn main() -> Result<()> {
@@ -79,5 +89,8 @@ fn main() -> Result<()> {
         Commands::Smf(cmd) => smf::handle(cmd),
         Commands::Atlas(cmd) => atlas::handle(cmd),
         Commands::Resources(cmd) => resources::handle(cmd),
+        Commands::Pak(cmd) => pak::handle(cmd),
+        Commands::Reanim(cmd) => reanim::handle(cmd),
+        Commands::Particles(cmd) => particles::handle(cmd),
     }
 }

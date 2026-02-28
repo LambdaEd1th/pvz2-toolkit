@@ -26,3 +26,6 @@ atlas = { path = "../core/atlas" }
 pvz2_resources = { path = "../core/resources", package = "resources" }
 texture_packer = "0.30.0"
 walkdir = "2.5.0"
+pak = { path = "../core/pak" }
+reanim = { path = "../core/reanim" }
+particles = { path = "../core/particles" }

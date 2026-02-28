@@ -637,6 +637,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b375d6465b98090a5f25b1c7703f3859783755aa9a80433b36e0379a3ec2f369"
 dependencies = [
  "crc32fast",
+ "libz-sys",
  "miniz_oxide",
  "zlib-rs",
 ]
@@ -898,6 +899,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libz-sys"
+version = "1.1.24"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4735e9cbde5aac84a5ce588f6b23a90b9b0b528f6c5a8db8a4aff300463a0839"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1150,6 +1162,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pak"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "flate2",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "pam"
 version = "0.1.0"
 dependencies = [
@@ -1157,7 +1179,7 @@ dependencies = [
  "bitflags 2.10.0",
  "byteorder",
  "image",
- "quick-xml",
+ "quick-xml 0.39.2",
  "rayon",
  "regex",
  "scraper",
@@ -1187,6 +1209,17 @@ dependencies = [
  "redox_syscall",
  "smallvec",
  "windows-link",
+]
+
+[[package]]
+name = "particles"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "flate2",
+ "quick-xml 0.37.5",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -1262,6 +1295,12 @@ checksum = "e57fef6bc5981e38c2ce2d63bfa546861309f875b8a75f092d1d54ae2d64f266"
 dependencies = [
  "siphasher",
 ]
+
+[[package]]
+name = "pkg-config"
+version = "0.3.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "png"
@@ -1366,10 +1405,13 @@ dependencies = [
  "lawnstrings",
  "md-5",
  "newton",
+ "pak",
  "pam",
+ "particles",
  "patch",
  "popfx",
  "rayon",
+ "reanim",
  "resources",
  "rsb",
  "rton",
@@ -1404,6 +1446,15 @@ name = "quick-error"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a993555f31e5a609f617c12db6250dedcac1b0a85076912c436e6fc9b2c8e6a3"
+
+[[package]]
+name = "quick-xml"
+version = "0.37.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "331e97a1af0bf59823e6eadffe373d7b27f485be8748f71471c662c1f269b7fb"
+dependencies = [
+ "memchr",
+]
 
 [[package]]
 name = "quick-xml"
@@ -1526,6 +1577,16 @@ checksum = "22e18b0f0062d30d4230b2e85ff77fdfe4326feb054b9783a3460d8435c8ab91"
 dependencies = [
  "crossbeam-deque",
  "crossbeam-utils",
+]
+
+[[package]]
+name = "reanim"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "flate2",
+ "serde",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -2212,6 +2273,12 @@ dependencies = [
  "num-traits",
  "wasm-bindgen",
 ]
+
+[[package]]
+name = "vcpkg"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "version_check"
