@@ -32,8 +32,9 @@ mod tests {
             },
         ];
 
-        let mut out_buf = Vec::new();
+        let mut out_buf = Cursor::new(Vec::new());
         pack(&mut out_buf, &original_info, &original_records).expect("Packing failed");
+        let out_buf = out_buf.into_inner();
 
         let mut cursor = Cursor::new(out_buf);
         let (decoded_info, decoded_records) = unpack(&mut cursor).expect("Unpacking failed");
@@ -63,8 +64,9 @@ mod tests {
             data: b"Compress me nicely! Compress me nicely! Compress me nicely!".to_vec(),
         }];
 
-        let mut out_buf = Vec::new();
+        let mut out_buf = Cursor::new(Vec::new());
         pack(&mut out_buf, &original_info, &original_records).expect("Packing failed");
+        let out_buf = out_buf.into_inner();
 
         let mut cursor = Cursor::new(out_buf);
         let (decoded_info, decoded_records) = unpack(&mut cursor).expect("Unpacking failed");
@@ -78,5 +80,39 @@ mod tests {
 
         assert_eq!(decoded_records[0].path, original_records[0].path);
         assert_eq!(decoded_records[0].data, original_records[0].data);
+    }
+
+    #[test]
+    fn test_pak_roundtrip_tv() {
+        let original_info = PakInfo {
+            pak_platform: "TV".to_string(),
+            pak_use_windows_path_separate: false,
+            pak_use_zlib_compress: false,
+        };
+
+        let original_records = vec![
+            PakRecord {
+                path: "test/file1.txt".to_string(),
+                data: b"Hello TV!".to_vec(),
+            },
+            PakRecord {
+                path: "test/file2.bin".to_string(),
+                data: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            },
+        ];
+
+        let mut out_buf = Cursor::new(Vec::new());
+        pack(&mut out_buf, &original_info, &original_records).expect("Packing failed");
+        let out_buf = out_buf.into_inner();
+
+        let mut cursor = Cursor::new(out_buf);
+        let (decoded_info, decoded_records) = unpack(&mut cursor).expect("Unpacking failed");
+
+        assert_eq!(decoded_info.pak_platform, "TV");
+        assert_eq!(decoded_records.len(), original_records.len());
+        assert_eq!(decoded_records[0].path, original_records[0].path);
+        assert_eq!(decoded_records[0].data, original_records[0].data);
+        assert_eq!(decoded_records[1].path, original_records[1].path);
+        assert_eq!(decoded_records[1].data, original_records[1].data);
     }
 }

@@ -7,13 +7,13 @@ use std::io::Write;
 /// The standard PAK magic, same constant as in reader.
 const PAK_MAGIC: u32 = (-1161803072i32) as u32;
 
-pub fn pack<W: Write>(writer: &mut W, info: &PakInfo, files: &[PakRecord]) -> Result<()> {
+pub fn pack<W: Write + std::io::Seek>(
+    writer: &mut W,
+    info: &PakInfo,
+    files: &[PakRecord],
+) -> Result<()> {
     if info.pak_platform == "TV" {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "TV PAK packing is not supported",
-        )
-        .into());
+        return pack_tv(writer, files);
     }
 
     let is_compress = info.pak_use_zlib_compress;
@@ -139,5 +139,19 @@ fn fill_alignment(buf: &mut Vec<u8>) -> Result<()> {
         buf.write_u16::<LE>(w)?;
         buf.write_all(&vec![0u8; w as usize])?;
     }
+    Ok(())
+}
+
+fn pack_tv<W: Write + std::io::Seek>(writer: &mut W, files: &[PakRecord]) -> Result<()> {
+    let mut zip_writer = zip::ZipWriter::new(writer);
+    let options = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+
+    for record in files {
+        zip_writer.start_file(&record.path, options)?;
+        zip_writer.write_all(&record.data)?;
+    }
+
+    zip_writer.finish()?;
     Ok(())
 }

@@ -48,11 +48,7 @@ pub fn unpack<R: Read + Seek>(mut reader: R) -> Result<(PakInfo, Vec<PakRecord>)
     }
 
     if is_tv {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "TV PAK (ZIP) unpacking is not supported natively",
-        )
-        .into());
+        return unpack_tv(&raw);
     }
 
     // Now `raw` is the decrypted data starting with PAK_MAGIC.
@@ -176,6 +172,37 @@ pub fn unpack<R: Read + Seek>(mut reader: R) -> Result<(PakInfo, Vec<PakRecord>)
             pak_platform,
             pak_use_windows_path_separate: windows_path_separate,
             pak_use_zlib_compress: is_zlib,
+        },
+        records,
+    ))
+}
+
+fn unpack_tv(raw: &[u8]) -> Result<(PakInfo, Vec<PakRecord>)> {
+    let cursor = std::io::Cursor::new(raw);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+    let mut records = Vec::new();
+
+    for i in 0..archive.len() {
+        let mut file = archive.by_index(i)?;
+        if file.is_dir() {
+            continue;
+        }
+        let path = file.name().to_string();
+        let mut data = Vec::new();
+        std::io::Read::read_to_end(&mut file, &mut data)?;
+        records.push(PakRecord { path, data });
+    }
+
+    let windows_path_separate = records
+        .first()
+        .map(|r| r.path.contains('\\'))
+        .unwrap_or(false);
+
+    Ok((
+        PakInfo {
+            pak_platform: "TV".to_string(),
+            pak_use_windows_path_separate: windows_path_separate,
+            pak_use_zlib_compress: false,
         },
         records,
     ))

@@ -123,9 +123,9 @@ fn pak_pack(
         }
     }
 
-    let mut out_buf = Vec::new();
+    let mut out_buf = std::io::Cursor::new(Vec::new());
     pak::pack(&mut out_buf, &info, &records)?;
-    fs::write(&out_path, out_buf)?;
+    fs::write(&out_path, out_buf.into_inner())?;
 
     println!(
         "Packed PAK to {:?} ({}, {} files)",
