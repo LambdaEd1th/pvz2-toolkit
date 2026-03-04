@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::path::Path;
 
-use crate::xml_writer::XmlWriter;
+use crate::xfl::xml_writer::XmlWriter;
 
 const XFL_NS: &str = "http://ns.adobe.com/xfl/2008/";
 const XSI_NS: &str = "http://www.w3.org/2001/XMLSchema-instance";

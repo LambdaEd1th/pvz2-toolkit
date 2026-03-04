@@ -1,17 +1,12 @@
 pub mod error;
-pub mod reader;
+pub mod io;
 pub mod types;
-pub mod writer;
-pub mod xfl_decoder;
-pub mod xfl_encoder;
-pub(crate) mod xml_writer;
+pub mod xfl;
 
 pub use error::ReanimError;
-pub use reader::{decode, decode_pc, decode_phone32, decode_phone64};
+pub use io::{decode, decode_pc, decode_phone32, decode_phone64, encode};
 pub use types::{Reanim, ReanimTrack, ReanimTransform, ReanimVersion};
-pub use writer::encode;
-pub use xfl_decoder::decode_xfl;
-pub use xfl_encoder::encode_xfl;
+pub use xfl::{decode_xfl, encode_xfl};
 
 #[cfg(test)]
 mod tests {

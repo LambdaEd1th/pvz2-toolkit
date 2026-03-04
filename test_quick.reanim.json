@@ -1,0 +1,59 @@
+{
+  "do_scale": null,
+  "fps": 30.0,
+  "tracks": [
+    {
+      "name": "head",
+      "transforms": [
+        {
+          "x": 1.0,
+          "y": null,
+          "kx": null,
+          "ky": null,
+          "sx": null,
+          "sy": null,
+          "f": null,
+          "a": null,
+          "i": "IMAGE_ZOMBIE_HEAD",
+          "resource": null,
+          "i2": null,
+          "resource2": null,
+          "font": null,
+          "text": null
+        },
+        {
+          "x": 2.0,
+          "y": 5.0,
+          "kx": 0.5,
+          "ky": 0.5,
+          "sx": 1.5,
+          "sy": null,
+          "f": null,
+          "a": null,
+          "i": "IMAGE_ZOMBIE_HEAD",
+          "resource": null,
+          "i2": null,
+          "resource2": null,
+          "font": null,
+          "text": null
+        },
+        {
+          "x": null,
+          "y": null,
+          "kx": null,
+          "ky": null,
+          "sx": null,
+          "sy": null,
+          "f": -1.0,
+          "a": null,
+          "i": null,
+          "resource": null,
+          "i2": null,
+          "resource2": null,
+          "font": null,
+          "text": null
+        }
+      ]
+    }
+  ]
+}
