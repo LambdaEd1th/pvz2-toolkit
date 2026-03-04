@@ -35,9 +35,9 @@ pub enum RtonCommands {
         /// Output file (optional)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Encryption Seed (required)
+        /// Encryption Seed (optional, uses default if empty)
         #[arg(long)]
-        seed: String,
+        seed: Option<String>,
     },
     /// Decrypt RTON/File
     Decrypt {
@@ -46,9 +46,9 @@ pub enum RtonCommands {
         /// Output file (optional)
         #[arg(short, long)]
         output: Option<PathBuf>,
-        /// Encryption Seed (required)
+        /// Encryption Seed (optional, uses default if empty)
         #[arg(long)]
-        seed: String,
+        seed: Option<String>,
     },
 }
 
@@ -68,12 +68,12 @@ pub fn handle(cmd: RtonCommands) -> Result<()> {
             input,
             output,
             seed,
-        } => rton_encrypt_file(&input, &output, &seed),
+        } => rton_encrypt_file(&input, &output, seed.as_deref()),
         RtonCommands::Decrypt {
             input,
             output,
             seed,
-        } => rton_decrypt_file(&input, &output, &seed),
+        } => rton_decrypt_file(&input, &output, seed.as_deref()),
     }
 }
 
@@ -109,7 +109,7 @@ pub fn rton_encode(input: &Path, output: &Option<PathBuf>, seed: Option<&str>) -
     Ok(())
 }
 
-pub fn rton_encrypt_file(input: &Path, output: &Option<PathBuf>, seed: &str) -> Result<()> {
+pub fn rton_encrypt_file(input: &Path, output: &Option<PathBuf>, seed: Option<&str>) -> Result<()> {
     // Encrypt raw file
     let data = fs::read(input)?;
     let encrypted = rton::crypto::encrypt_data(&data, seed)?;
@@ -124,7 +124,7 @@ pub fn rton_encrypt_file(input: &Path, output: &Option<PathBuf>, seed: &str) -> 
     Ok(())
 }
 
-pub fn rton_decrypt_file(input: &Path, output: &Option<PathBuf>, seed: &str) -> Result<()> {
+pub fn rton_decrypt_file(input: &Path, output: &Option<PathBuf>, seed: Option<&str>) -> Result<()> {
     // Decrypt raw file
     let data = fs::read(input)?;
     let decrypted = rton::crypto::decrypt_data(&data, seed)?;

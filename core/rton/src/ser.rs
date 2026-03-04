@@ -119,7 +119,7 @@ pub fn to_writer<W: Write, T: Serialize>(
         to_writer(&mut buffer, value, None)?;
 
         // Encrypt buffer using shared crypto module
-        let encrypted = crate::crypto::encrypt_data(&buffer, key_str)
+        let encrypted = crate::crypto::encrypt_data(&buffer, Some(key_str))
             .map_err(|e| Error::Message(format!("Encryption failed: {:?}", e)))?;
 
         writer.write_all(&encrypted)?;

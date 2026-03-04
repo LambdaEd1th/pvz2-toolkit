@@ -88,14 +88,12 @@ fn validate_header_and_decrypt<R: Read>(
 
     // Check for Encrypted Header (u16 0x010 LE -> [0x10, 0x00])
     if header_start == [0x10, 0x00] {
-        let key_str = key_seed.ok_or(Error::MissingKey)?;
-
         // Read ciphertext
         let mut cipher_text = Vec::new();
         reader.read_to_end(&mut cipher_text)?;
 
         // Decrypt using shared crypto module
-        let decrypted = crate::crypto::decrypt_data(&cipher_text, key_str)
+        let decrypted = crate::crypto::decrypt_data(&cipher_text, key_seed)
             .map_err(|e| Error::DecryptionError(format!("Decryption failed: {:?}", e)))?;
 
         // Validating the inner content logic is handled by the caller recursively calling standard methods
