@@ -4,11 +4,17 @@ use quick_xml::events::Event;
 use regex::Regex;
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
 use std::path::Path;
+use zip::ZipArchive;
 
 use crate::types::*;
 
-pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
+pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> {
+    let file = fs::File::open(input_path)
+        .with_context(|| format!("Failed to open {:?}", input_path))?;
+    let mut archive = ZipArchive::new(file).context("Failed to read FLA archive")?;
+
     let mut pam_info = PamInfo {
         version: 5,
         frame_rate: 30,
@@ -25,9 +31,7 @@ pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
         },
     };
 
-    let doc_path = input_dir.join("DOMDocument.xml");
-    let doc_str =
-        fs::read_to_string(&doc_path).with_context(|| format!("Failed to read {:?}", doc_path))?;
+    let doc_str = read_zip_entry(&mut archive, "DOMDocument.xml")?;
 
     let mut reader = Reader::from_str(&doc_str);
     reader.config_mut().trim_text(true);
@@ -126,45 +130,53 @@ pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
     let mut id_to_size: HashMap<i32, [i32; 2]> = HashMap::new();
     let dim_regex = Regex::new(r"_(\d+)x(\d+)(_\d+)?$").unwrap();
 
-    let source_dir = input_dir.join("LIBRARY").join("source");
-    if source_dir.exists() {
-        for entry in fs::read_dir(source_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                && stem.starts_with("source_")
-                && let Ok(idx) = stem[7..].parse::<i32>()
-            {
-                let xml_str = fs::read_to_string(&path)?;
-                let mut rd = Reader::from_str(&xml_str);
-                rd.config_mut().trim_text(true);
-                loop {
-                    match rd.read_event() {
-                        Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
-                            if e.name().as_ref() == b"DOMBitmapInstance" {
-                                for attr in e.attributes() {
-                                    let attr = attr?;
-                                    if attr.key.as_ref() == b"libraryItemName" {
-                                        let name = String::from_utf8_lossy(&attr.value)
-                                            .replace("media/", "");
-                                        id_to_name.insert(idx, name.clone());
-
-                                        let mut size = [0, 0];
-                                        if let Some(caps) = dim_regex.captures(&name) {
-                                            size[0] =
-                                                caps.get(1).unwrap().as_str().parse().unwrap_or(0);
-                                            size[1] =
-                                                caps.get(2).unwrap().as_str().parse().unwrap_or(0);
-                                        }
-                                        id_to_size.insert(idx, size);
-                                    }
-                                }
-                            }
+    let source_entries: Vec<(i32, String)> = {
+        let mut entries = Vec::new();
+        for i in 0..archive.len() {
+            if let Ok(entry) = archive.by_index(i) {
+                let name = entry.name().to_string();
+                if let Some(rest) = name.strip_prefix("LIBRARY/source/source_") {
+                    if let Some(stem) = rest.strip_suffix(".xml") {
+                        if let Ok(idx) = stem.parse::<i32>() {
+                            entries.push((idx, name));
                         }
-                        Ok(Event::Eof) => break,
-                        _ => {}
                     }
                 }
+            }
+        }
+        entries.sort_by_key(|k| k.0);
+        entries
+    };
+
+    for (idx, entry_name) in &source_entries {
+        let xml_str = read_zip_entry(&mut archive, entry_name)?;
+        let mut rd = Reader::from_str(&xml_str);
+        rd.config_mut().trim_text(true);
+        loop {
+            match rd.read_event() {
+                Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
+                    if e.name().as_ref() == b"DOMBitmapInstance" {
+                        for attr in e.attributes() {
+                            let attr = attr?;
+                            if attr.key.as_ref() == b"libraryItemName" {
+                                let name = String::from_utf8_lossy(&attr.value)
+                                    .replace("media/", "");
+                                id_to_name.insert(*idx, name.clone());
+
+                                let mut size = [0, 0];
+                                if let Some(caps) = dim_regex.captures(&name) {
+                                    size[0] =
+                                        caps.get(1).unwrap().as_str().parse().unwrap_or(0);
+                                    size[1] =
+                                        caps.get(2).unwrap().as_str().parse().unwrap_or(0);
+                                }
+                                id_to_size.insert(*idx, size);
+                            }
+                        }
+                    }
+                }
+                Ok(Event::Eof) => break,
+                _ => {}
             }
         }
     }
@@ -177,12 +189,8 @@ pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
         let size = id_to_size[&idx];
         let mut transform = vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
 
-        let img_path = input_dir
-            .join("LIBRARY")
-            .join("image")
-            .join(format!("image_{}.xml", idx));
-        if img_path.exists() {
-            let xml_str = fs::read_to_string(&img_path)?;
+        let img_name = format!("LIBRARY/image/image_{}.xml", idx);
+        if let Ok(xml_str) = read_zip_entry(&mut archive, &img_name) {
             let mut rd = Reader::from_str(&xml_str);
             rd.config_mut().trim_text(true);
             loop {
@@ -217,30 +225,32 @@ pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
         });
     }
 
-    let sprite_dir = input_dir.join("LIBRARY").join("sprite");
-    let mut sprite_files = Vec::new();
-    if sprite_dir.exists() {
-        for entry in fs::read_dir(sprite_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if let Some(stem) = path.file_stem().and_then(|s| s.to_str())
-                && stem.starts_with("sprite_")
-                && let Ok(idx) = stem[7..].parse::<i32>()
-            {
-                sprite_files.push((idx, path));
+    let sprite_entries: Vec<(i32, String)> = {
+        let mut entries = Vec::new();
+        for i in 0..archive.len() {
+            if let Ok(entry) = archive.by_index(i) {
+                let name = entry.name().to_string();
+                if let Some(rest) = name.strip_prefix("LIBRARY/sprite/sprite_") {
+                    if let Some(stem) = rest.strip_suffix(".xml") {
+                        if let Ok(idx) = stem.parse::<i32>() {
+                            entries.push((idx, name));
+                        }
+                    }
+                }
             }
         }
-    }
-    sprite_files.sort_by_key(|k| k.0);
+        entries.sort_by_key(|k| k.0);
+        entries
+    };
 
-    for (_, path) in sprite_files {
-        let sp = parse_sprite_document(&path)?;
+    for (_, entry_name) in &sprite_entries {
+        let xml_str = read_zip_entry(&mut archive, entry_name)?;
+        let sp = parse_sprite_xml(&xml_str)?;
         pam_info.sprite.push(sp);
     }
 
-    let main_path = input_dir.join("LIBRARY").join("main.xml");
-    if main_path.exists() {
-        let mut main_sp = parse_sprite_document(&main_path)?;
+    if let Ok(main_xml) = read_zip_entry(&mut archive, "LIBRARY/main.xml") {
+        let mut main_sp = parse_sprite_xml(&main_xml)?;
         main_sp.name = Some("main_sprite".to_string());
 
         let frames_len = pam_info.main_sprite.frame.len().max(main_sp.frame.len());
@@ -260,8 +270,16 @@ pub fn convert_from_xfl(input_dir: &Path, _resolution: i32) -> Result<PamInfo> {
     Ok(pam_info)
 }
 
-fn parse_sprite_document(path: &Path) -> Result<SpriteInfo> {
-    let xml_str = fs::read_to_string(path)?;
+fn read_zip_entry(archive: &mut ZipArchive<fs::File>, name: &str) -> Result<String> {
+    let mut entry = archive
+        .by_name(name)
+        .with_context(|| format!("{} not found in FLA", name))?;
+    let mut s = String::new();
+    entry.read_to_string(&mut s)?;
+    Ok(s)
+}
+
+fn parse_sprite_xml(xml_str: &str) -> Result<SpriteInfo> {
     let mut reader = Reader::from_str(&xml_str);
     reader.config_mut().trim_text(true);
 

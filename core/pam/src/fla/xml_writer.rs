@@ -89,4 +89,8 @@ impl<W: Write> XmlWriter<W> {
             .map_err(io::Error::other)?;
         Ok(())
     }
+
+    pub fn into_inner(self) -> W {
+        self.writer.into_inner()
+    }
 }

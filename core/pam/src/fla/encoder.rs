@@ -4,82 +4,72 @@ use crate::types::{ImageInfo, SpriteInfo};
 use anyhow::{Context, Result};
 use std::collections::HashMap;
 use std::fs;
+use std::io::Write;
 use std::path::Path;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
 const XFL_NS: &str = "http://ns.adobe.com/xfl/2008/";
 const XSI_NS: &str = "http://www.w3.org/2001/XMLSchema-instance";
 
-pub fn convert_to_xfl(pam: &PamInfo, output_dir: &Path, resolution: i32) -> Result<()> {
-    fs::create_dir_all(output_dir)?;
+pub fn convert_to_fla(pam: &PamInfo, output_path: &Path, resolution: i32) -> Result<()> {
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let file = fs::File::create(output_path)
+        .with_context(|| format!("Failed to create {:?}", output_path))?;
+    let mut zip = ZipWriter::new(file);
+    let options = SimpleFileOptions::default();
 
-    // Create folders
-    let library_dir = output_dir.join("LIBRARY");
-    fs::create_dir_all(&library_dir)?;
-    fs::create_dir_all(library_dir.join("media"))?;
-    fs::create_dir_all(library_dir.join("source"))?;
-    fs::create_dir_all(library_dir.join("image"))?;
-    fs::create_dir_all(library_dir.join("sprite"))?;
+    // Add directory entries
+    zip.add_directory("LIBRARY/", options)?;
+    zip.add_directory("LIBRARY/media/", options)?;
+    zip.add_directory("LIBRARY/source/", options)?;
+    zip.add_directory("LIBRARY/image/", options)?;
+    zip.add_directory("LIBRARY/sprite/", options)?;
 
-    // Write media placeholders
+    // Write source and image documents
     for (i, image) in pam.image.iter().enumerate() {
-        write_source_document(
-            i,
-            image,
-            &library_dir
-                .join("source")
-                .join(format!("source_{}.xml", i + 1)),
-            resolution,
-        )?;
-        write_image_document(
-            i,
-            image,
-            &library_dir
-                .join("image")
-                .join(format!("image_{}.xml", i + 1)),
-        )?;
+        let source_data = write_source_document(i, image, resolution)?;
+        zip.start_file(format!("LIBRARY/source/source_{}.xml", i + 1), options)?;
+        zip.write_all(&source_data)?;
+
+        let image_data = write_image_document(i, image)?;
+        zip.start_file(format!("LIBRARY/image/image_{}.xml", i + 1), options)?;
+        zip.write_all(&image_data)?;
     }
 
+    // Write sprite documents
     for (i, sprite) in pam.sprite.iter().enumerate() {
-        write_sprite_document(
-            i as i32,
-            sprite,
-            &library_dir
-                .join("sprite")
-                .join(format!("sprite_{}.xml", i + 1)),
-            &pam.sprite,
-        )?;
+        let sprite_data = write_sprite_document(i as i32, sprite, &pam.sprite)?;
+        zip.start_file(format!("LIBRARY/sprite/sprite_{}.xml", i + 1), options)?;
+        zip.write_all(&sprite_data)?;
     }
 
     // Main sprite
-    write_sprite_document(
-        -1,
-        &pam.main_sprite,
-        &library_dir.join("main.xml"),
-        &pam.sprite,
-    )?;
+    let main_data = write_sprite_document(-1, &pam.main_sprite, &pam.sprite)?;
+    zip.start_file("LIBRARY/main.xml", options)?;
+    zip.write_all(&main_data)?;
 
     // DOMDocument.xml
-    write_dom_document(pam, &output_dir.join("DOMDocument.xml"))
-        .context("DOMDocument generation failed")?;
+    let dom_data = write_dom_document(pam).context("DOMDocument generation failed")?;
+    zip.start_file("DOMDocument.xml", options)?;
+    zip.write_all(&dom_data)?;
 
     // main.xfl
-    fs::write(output_dir.join("main.xfl"), "PROXY-CS5")
-        .context("main.xfl proxy generation failed")?;
+    zip.start_file("main.xfl", options)?;
+    zip.write_all(b"PROXY-CS5")?;
 
+    zip.finish()?;
     Ok(())
 }
 
 fn write_source_document(
     index: usize,
     image: &ImageInfo,
-    path: &Path,
     resolution: i32,
-) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let file = fs::File::create(path)?;
-    let mut w = XmlWriter::new(file);
+) -> Result<Vec<u8>> {
+    let mut w = XmlWriter::new(Vec::new());
 
     let name = format!("source/source_{}", index + 1);
     let media_name = format!(
@@ -123,15 +113,11 @@ fn write_source_document(
     w.end_element("timeline")?;
     w.end_element("DOMSymbolItem")?;
 
-    Ok(())
+    Ok(w.into_inner())
 }
 
-fn write_image_document(index: usize, image: &ImageInfo, path: &Path) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let file = fs::File::create(path)?;
-    let mut w = XmlWriter::new(file);
+fn write_image_document(index: usize, image: &ImageInfo) -> Result<Vec<u8>> {
+    let mut w = XmlWriter::new(Vec::new());
 
     let name = format!("image/image_{}", index + 1);
     let source_name = format!("source/source_{}", index + 1);
@@ -183,20 +169,15 @@ fn write_image_document(index: usize, image: &ImageInfo, path: &Path) -> Result<
     w.end_element("timeline")?;
     w.end_element("DOMSymbolItem")?;
 
-    Ok(())
+    Ok(w.into_inner())
 }
 
 fn write_sprite_document(
     index: i32,
     sprite: &SpriteInfo,
-    path: &Path,
     sub_sprites: &[SpriteInfo],
-) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-    let file = fs::File::create(path)?;
-    let mut w = XmlWriter::new(file);
+) -> Result<Vec<u8>> {
+    let mut w = XmlWriter::new(Vec::new());
 
     let name = if index == -1 {
         "main".to_string()
@@ -317,7 +298,7 @@ fn write_sprite_document(
     w.end_element("timeline")?;
     w.end_element("DOMSymbolItem")?;
 
-    Ok(())
+    Ok(w.into_inner())
 }
 
 struct DomFrameData {
@@ -453,9 +434,8 @@ fn decode_frame_node_list(
     frame_node_list
 }
 
-fn write_dom_document(pam: &PamInfo, path: &Path) -> Result<()> {
-    let file = fs::File::create(path)?;
-    let mut w = XmlWriter::new(file);
+fn write_dom_document(pam: &PamInfo) -> Result<Vec<u8>> {
+    let mut w = XmlWriter::new(Vec::new());
 
     w.start_element(
         "DOMDocument",
@@ -684,7 +664,7 @@ fn write_dom_document(pam: &PamInfo, path: &Path) -> Result<()> {
 
     w.end_element("DOMDocument")?;
 
-    Ok(())
+    Ok(w.into_inner())
 }
 
 fn format_float(f: f64) -> String {

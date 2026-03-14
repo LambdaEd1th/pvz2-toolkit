@@ -1,9 +1,7 @@
 pub mod binary;
-pub mod html;
-pub mod render;
 pub mod types;
-pub mod xfl;
+pub mod fla;
 
 pub use binary::{decode_pam, encode_pam};
 pub use types::PamInfo;
-pub use xfl::{convert_from_xfl, convert_to_xfl};
+pub use fla::{convert_from_fla, convert_to_fla};
