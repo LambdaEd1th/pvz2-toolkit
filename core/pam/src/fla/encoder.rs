@@ -441,6 +441,9 @@ fn decode_frame_node_list(
 fn write_dom_document(pam: &PamInfo) -> Result<Vec<u8>> {
     let mut w = XmlWriter::new(Vec::new());
 
+    let pam_version_str = pam.version.to_string();
+    let pam_pos_x_str = pam.position[0].to_string();
+    let pam_pos_y_str = pam.position[1].to_string();
     w.start_element(
         "DOMDocument",
         &[
@@ -455,6 +458,9 @@ fn write_dom_document(pam: &PamInfo) -> Result<Vec<u8>> {
             ("platform", "Windows"),
             ("versionInfo", "Saved by Animate Windows 19.0 build 326"),
             ("objectsSnapTo", "false"),
+            ("pamVersion", &pam_version_str),
+            ("pamPositionX", &pam_pos_x_str),
+            ("pamPositionY", &pam_pos_y_str),
         ],
     )?;
 

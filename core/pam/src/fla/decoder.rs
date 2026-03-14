@@ -58,6 +58,15 @@ pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> 
                         } else if attr.key.as_ref() == b"frameRate" {
                             pam_info.frame_rate =
                                 String::from_utf8_lossy(&attr.value).parse().unwrap_or(30);
+                        } else if attr.key.as_ref() == b"pamVersion" {
+                            pam_info.version =
+                                String::from_utf8_lossy(&attr.value).parse().unwrap_or(5);
+                        } else if attr.key.as_ref() == b"pamPositionX" {
+                            pam_info.position[0] =
+                                String::from_utf8_lossy(&attr.value).parse().unwrap_or(0.0);
+                        } else if attr.key.as_ref() == b"pamPositionY" {
+                            pam_info.position[1] =
+                                String::from_utf8_lossy(&attr.value).parse().unwrap_or(0.0);
                         }
                     }
                 }
