@@ -95,7 +95,11 @@ fn write_source_document(
     w.start_element("DOMFrame", &[("index", "0"), ("keyMode", "9728")])?;
     w.start_element("elements", &[])?;
 
-    w.start_element("DOMBitmapInstance", &[("libraryItemName", &media_name)])?;
+    let mut bitmap_attrs: Vec<(&str, &str)> = vec![("libraryItemName", &media_name)];
+    if image.name.contains('|') {
+        bitmap_attrs.push(("pamName", &image.name));
+    }
+    w.start_element("DOMBitmapInstance", &bitmap_attrs)?;
     w.start_element("matrix", &[])?;
 
     let scale = 1200.0 / (resolution as f64);

@@ -156,22 +156,25 @@ pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> 
             match rd.read_event() {
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
                     if e.name().as_ref() == b"DOMBitmapInstance" {
+                        let mut lib_name: Option<String> = None;
+                        let mut pam_name: Option<String> = None;
                         for attr in e.attributes() {
                             let attr = attr?;
-                            if attr.key.as_ref() == b"libraryItemName" {
-                                let name = String::from_utf8_lossy(&attr.value)
-                                    .replace("media/", "");
-                                id_to_name.insert(*idx, name.clone());
-
-                                let mut size = [0, 0];
-                                if let Some(caps) = dim_regex.captures(&name) {
-                                    size[0] =
-                                        caps.get(1).unwrap().as_str().parse().unwrap_or(0);
-                                    size[1] =
-                                        caps.get(2).unwrap().as_str().parse().unwrap_or(0);
-                                }
-                                id_to_size.insert(*idx, size);
+                            if attr.key.as_ref() == b"pamName" {
+                                pam_name = Some(String::from_utf8_lossy(&attr.value).into_owned());
+                            } else if attr.key.as_ref() == b"libraryItemName" {
+                                lib_name = Some(String::from_utf8_lossy(&attr.value).replace("media/", ""));
                             }
+                        }
+                        if let Some(name) = pam_name.or(lib_name) {
+                            let dim_source = name.split('|').next().unwrap_or(&name);
+                            let mut size = [0, 0];
+                            if let Some(caps) = dim_regex.captures(dim_source) {
+                                size[0] = caps.get(1).unwrap().as_str().parse().unwrap_or(0);
+                                size[1] = caps.get(2).unwrap().as_str().parse().unwrap_or(0);
+                            }
+                            id_to_name.insert(*idx, name);
+                            id_to_size.insert(*idx, size);
                         }
                     }
                 }
