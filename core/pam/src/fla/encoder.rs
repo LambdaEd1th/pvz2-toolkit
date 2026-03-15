@@ -2,6 +2,7 @@ use super::xml_writer::XmlWriter;
 use crate::PamInfo;
 use crate::types::{ImageInfo, SpriteInfo};
 use anyhow::{Context, Result};
+use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
@@ -11,6 +12,17 @@ use zip::write::SimpleFileOptions;
 
 const XFL_NS: &str = "http://ns.adobe.com/xfl/2008/";
 const XSI_NS: &str = "http://www.w3.org/2001/XMLSchema-instance";
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PamSidecar {
+    schema: &'static str,
+    version: i32,
+    frame_rate: i32,
+    position: [f64; 2],
+    size: [f64; 2],
+    image_names: Vec<String>,
+}
 
 pub fn convert_to_fla(pam: &PamInfo, output_path: &Path, resolution: i32) -> Result<()> {
     if let Some(parent) = output_path.parent() {
@@ -56,6 +68,11 @@ pub fn convert_to_fla(pam: &PamInfo, output_path: &Path, resolution: i32) -> Res
     zip.start_file("DOMDocument.xml", options)?;
     zip.write_all(&dom_data)?;
 
+    // PAM.sidecar.json
+    let sidecar_data = write_pam_sidecar(pam)?;
+    zip.start_file("PAM.sidecar.json", options)?;
+    zip.write_all(&sidecar_data)?;
+
     // main.xfl
     zip.start_file("main.xfl", options)?;
     zip.write_all(b"PROXY-CS5")?;
@@ -95,11 +112,7 @@ fn write_source_document(
     w.start_element("DOMFrame", &[("index", "0"), ("keyMode", "9728")])?;
     w.start_element("elements", &[])?;
 
-    let mut bitmap_attrs: Vec<(&str, &str)> = vec![("libraryItemName", &media_name)];
-    if image.name.contains('|') {
-        bitmap_attrs.push(("pamName", &image.name));
-    }
-    w.start_element("DOMBitmapInstance", &bitmap_attrs)?;
+    w.start_element("DOMBitmapInstance", &[("libraryItemName", &media_name)])?;
     w.start_element("matrix", &[])?;
 
     let scale = 1200.0 / (resolution as f64);
@@ -441,9 +454,6 @@ fn decode_frame_node_list(
 fn write_dom_document(pam: &PamInfo) -> Result<Vec<u8>> {
     let mut w = XmlWriter::new(Vec::new());
 
-    let pam_version_str = pam.version.to_string();
-    let pam_pos_x_str = pam.position[0].to_string();
-    let pam_pos_y_str = pam.position[1].to_string();
     w.start_element(
         "DOMDocument",
         &[
@@ -458,9 +468,6 @@ fn write_dom_document(pam: &PamInfo) -> Result<Vec<u8>> {
             ("platform", "Windows"),
             ("versionInfo", "Saved by Animate Windows 19.0 build 326"),
             ("objectsSnapTo", "false"),
-            ("pamVersion", &pam_version_str),
-            ("pamPositionX", &pam_pos_x_str),
-            ("pamPositionY", &pam_pos_y_str),
         ],
     )?;
 
@@ -675,6 +682,18 @@ fn write_dom_document(pam: &PamInfo) -> Result<Vec<u8>> {
     w.end_element("DOMDocument")?;
 
     Ok(w.into_inner())
+}
+
+fn write_pam_sidecar(pam: &PamInfo) -> Result<Vec<u8>> {
+    let sidecar = PamSidecar {
+        schema: "pam-sidecar-v1",
+        version: pam.version,
+        frame_rate: pam.frame_rate,
+        position: pam.position,
+        size: pam.size,
+        image_names: pam.image.iter().map(|img| img.name.clone()).collect(),
+    };
+    Ok(serde_json::to_vec_pretty(&sidecar)?)
 }
 
 fn format_float(f: f64) -> String {

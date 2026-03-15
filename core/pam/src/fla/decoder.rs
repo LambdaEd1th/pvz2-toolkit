@@ -2,13 +2,26 @@ use anyhow::{Context, Result};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use regex::Regex;
+use serde::Deserialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io::Read;
 use std::path::Path;
+use zip::result::ZipError;
 use zip::ZipArchive;
 
 use crate::types::*;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PamSidecar {
+    schema: Option<String>,
+    version: Option<i32>,
+    frame_rate: Option<i32>,
+    position: Option<[f64; 2]>,
+    size: Option<[f64; 2]>,
+    image_names: Option<Vec<String>>,
+}
 
 pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> {
     let file = fs::File::open(input_path)
@@ -135,6 +148,23 @@ pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> 
         }
     }
 
+    let sidecar = read_pam_sidecar(&mut archive)?;
+    if let Some(sc) = &sidecar {
+        let _ = &sc.schema;
+        if let Some(v) = sc.version {
+            pam_info.version = v;
+        }
+        if let Some(fr) = sc.frame_rate {
+            pam_info.frame_rate = fr;
+        }
+        if let Some(pos) = sc.position {
+            pam_info.position = pos;
+        }
+        if let Some(size) = sc.size {
+            pam_info.size = size;
+        }
+    }
+
     let mut id_to_name: HashMap<i32, String> = HashMap::new();
     let mut id_to_size: HashMap<i32, [i32; 2]> = HashMap::new();
     let dim_regex = Regex::new(r"_(\d+)x(\d+)(_\d+)?$").unwrap();
@@ -189,6 +219,21 @@ pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> 
                 }
                 Ok(Event::Eof) => break,
                 _ => {}
+            }
+        }
+    }
+
+    if let Some(names) = sidecar
+        .as_ref()
+        .and_then(|sc| sc.image_names.as_ref())
+    {
+        for (i, full_name) in names.iter().enumerate() {
+            if full_name.is_empty() {
+                continue;
+            }
+            let idx = (i + 1) as i32;
+            if id_to_name.contains_key(&idx) {
+                id_to_name.insert(idx, full_name.clone());
             }
         }
     }
@@ -289,6 +334,37 @@ fn read_zip_entry(archive: &mut ZipArchive<fs::File>, name: &str) -> Result<Stri
     let mut s = String::new();
     entry.read_to_string(&mut s)?;
     Ok(s)
+}
+
+fn read_zip_entry_optional(
+    archive: &mut ZipArchive<fs::File>,
+    name: &str,
+) -> Result<Option<String>> {
+    match archive.by_name(name) {
+        Ok(mut entry) => {
+            let mut s = String::new();
+            entry.read_to_string(&mut s)?;
+            Ok(Some(s))
+        }
+        Err(ZipError::FileNotFound) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn read_pam_sidecar(archive: &mut ZipArchive<fs::File>) -> Result<Option<PamSidecar>> {
+    for name in [
+        "PAM.sidecar.json",
+        "pam.sidecar.json",
+        "PAM.sidecar",
+        "pam.sidecar",
+    ] {
+        if let Some(text) = read_zip_entry_optional(archive, name)? {
+            if let Ok(sidecar) = serde_json::from_str::<PamSidecar>(&text) {
+                return Ok(Some(sidecar));
+            }
+        }
+    }
+    Ok(None)
 }
 
 fn parse_sprite_xml(xml_str: &str) -> Result<SpriteInfo> {
