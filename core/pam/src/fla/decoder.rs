@@ -71,15 +71,6 @@ pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> 
                         } else if attr.key.as_ref() == b"frameRate" {
                             pam_info.frame_rate =
                                 String::from_utf8_lossy(&attr.value).parse().unwrap_or(30);
-                        } else if attr.key.as_ref() == b"pamVersion" {
-                            pam_info.version =
-                                String::from_utf8_lossy(&attr.value).parse().unwrap_or(5);
-                        } else if attr.key.as_ref() == b"pamPositionX" {
-                            pam_info.position[0] =
-                                String::from_utf8_lossy(&attr.value).parse().unwrap_or(0.0);
-                        } else if attr.key.as_ref() == b"pamPositionY" {
-                            pam_info.position[1] =
-                                String::from_utf8_lossy(&attr.value).parse().unwrap_or(0.0);
                         }
                     }
                 }
@@ -196,16 +187,13 @@ pub fn convert_from_fla(input_path: &Path, _resolution: i32) -> Result<PamInfo> 
                 Ok(Event::Start(ref e)) | Ok(Event::Empty(ref e)) => {
                     if e.name().as_ref() == b"DOMBitmapInstance" {
                         let mut lib_name: Option<String> = None;
-                        let mut pam_name: Option<String> = None;
                         for attr in e.attributes() {
                             let attr = attr?;
-                            if attr.key.as_ref() == b"pamName" {
-                                pam_name = Some(String::from_utf8_lossy(&attr.value).into_owned());
-                            } else if attr.key.as_ref() == b"libraryItemName" {
+                            if attr.key.as_ref() == b"libraryItemName" {
                                 lib_name = Some(String::from_utf8_lossy(&attr.value).replace("media/", ""));
                             }
                         }
-                        if let Some(name) = pam_name.or(lib_name) {
+                        if let Some(name) = lib_name {
                             let dim_source = name.split('|').next().unwrap_or(&name);
                             let mut size = [0, 0];
                             if let Some(caps) = dim_regex.captures(dim_source) {
